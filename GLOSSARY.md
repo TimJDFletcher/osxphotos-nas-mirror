@@ -20,6 +20,14 @@ _Avoid_: Pre-check, location check, guard
 One of the example preflight checks: the run goes ahead only when a given Ethernet dock is connected.
 _Avoid_: Location check
 
+**Run log**:
+The tool's own record of every run, a few lines each, ending with the run's outcome. Only its most recent lines are kept.
+_Avoid_: Log (alone), log file
+
+**Export log**:
+osxphotos's own account of one run's export, one line per photo, kept for only the most recent runs that exported.
+_Avoid_: osxphotos log, verbose log
+
 **Share**:
 The SMB share on the NAS that the library is exported to.
 _Avoid_: Volume, mount, destination
