@@ -1,0 +1,8 @@
+PING nas.example (192.0.2.10): 56 data bytes
+64 bytes from 192.0.2.10: icmp_seq=0 ttl=64 time=1.012 ms
+64 bytes from 192.0.2.10: icmp_seq=1 ttl=64 time=1.157 ms
+64 bytes from 192.0.2.10: icmp_seq=2 ttl=64 time=1.431 ms
+
+--- nas.example ping statistics ---
+3 packets transmitted, 3 packets received, 0.0% packet loss
+round-trip min/avg/max/stddev = 1.012/1.200/1.431/0.172 ms

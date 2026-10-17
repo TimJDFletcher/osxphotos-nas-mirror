@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- A template: make install fills in @REPO@ (this checkout) and @HOME@ (the
+     home directory) and installs the result in ~/Library/LaunchAgents. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.github.timjdfletcher.osxphotos-nas-mirror</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@REPO@/osxphotos-nas-mirror.sh</string>
+    </array>
+
+    <!-- launchd's default PATH has no /opt/homebrew/bin, where uv is. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- The script already writes every stdout line to the log itself, so
+         stdout is dropped here; only stderr (errors from cp, the mount,
+         osascript, and runs with no usable conf) goes to the log. -->
+    <key>StandardOutPath</key>
+    <string>/dev/null</string>
+    <key>StandardErrorPath</key>
+    <string>@HOME@/Library/Application Support/osxphotos-nas-mirror/osxphotos-nas-mirror.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- On the hour, every hour, so a Mac that is home at any hour is caught.
+         launchd runs one job for the hours missed asleep, on wake. The script
+         itself skips a run less than MIRROR_INTERVAL_DAYS after the last good
+         one, so the mirror runs about weekly. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+</dict>
+</plist>

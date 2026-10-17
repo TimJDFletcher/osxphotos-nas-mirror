@@ -1,0 +1,4 @@
+# The real conf lives in the app directory; the repo ships only the example.
+*.conf
+# Claude Code agent worktrees.
+/.claude/worktrees/

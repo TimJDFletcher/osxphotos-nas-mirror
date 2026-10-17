@@ -1,0 +1,13 @@
+# osxphotos.toml
+#
+# The osxphotos export options osxphotos-nas-mirror.sh loads. The export path
+# and the export database go on the command line, not here.
+
+[export]
+cleanup = true
+download_missing = true
+export_by_date = true
+retry = 5
+touch_file = true
+update = true
+verbose = true

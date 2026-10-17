@@ -1,0 +1,37 @@
+# examples/osxphotos-exif.toml
+#
+# An alternative osxphotos config for osxphotos-nas-mirror.sh, which does not
+# use it by default. It also writes metadata with exiftool, XMP sidecars and
+# Finder tags. To use it, copy it and set OSXPHOTOS_CONFIG in the conf to the
+# copy. Needs exiftool.
+
+[export]
+album_keyword = true
+download_missing = true
+exiftool = true
+exiftool_merge_keywords = true
+exiftool_merge_persons = true
+export_by_date = true
+favorite_rating = true
+finder_tag_keywords = true
+keyword_template = [
+    "Album: {folder_album}",
+    "{label}",
+    "{favorite?is_favorite}",
+    "is_{media_type}",
+]
+cleanup = true
+person_keyword = true
+retry = 10
+sidecar = [ "xmp",]
+sidecar_drop_ext = true
+strip = true
+# Optional, the author's preferences:
+# tmpdir = "/tmp"
+# theme = "dark"
+touch_file = true
+update = true
+verbose = true
+xattr_template = [ [ "findercomment", "{title}{title?{descr?{newline},},}{descr}",],]
+
+

@@ -1,0 +1,15 @@
+{
+  "base_rtt" : 23.589164733886719,
+  "cli_options" : [
+    "-c",
+    "-u"
+  ],
+  "dl_bytes_transferred" : 215482368,
+  "dl_flows" : 12,
+  "dl_throughput" : 87181864,
+  "end_date" : "2026-10-06 20:26:37.533",
+  "interface_name" : "en7",
+  "os_version" : "Version 27.0.1 (Build 26A5000a)",
+  "responsiveness" : 439.49862670898438,
+  "start_date" : "2026-10-06 20:26:18.291"
+}

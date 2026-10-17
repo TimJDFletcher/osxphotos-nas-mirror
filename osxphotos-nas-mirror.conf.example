@@ -1,0 +1,68 @@
+# ==========================================================
+# Example configuration for osxphotos-nas-mirror
+# ==========================================================
+# Copy this to
+#   ~/Library/Application Support/osxphotos-nas-mirror/osxphotos-nas-mirror.conf
+# and edit it. The script sources that file; OSXPHOTOS_NAS_MIRROR_CONF
+# overrides the path. The real conf is not tracked (*.conf is gitignored).
+
+# --- NAS Details ---
+NAS_USER="you"
+NAS_HOSTNAME="nas.local"
+NAS_SHARE="photos"
+
+# --- Mounting ---
+# The share is mounted as Finder mounts it, under /Volumes; the script finds
+# where from mount. Seconds to wait for the mount (optional, default 60).
+MOUNT_TIMEOUT=60
+# Seconds between checks that the share is still mounted while osxphotos
+# exports; a run that loses the share ends share-lost (optional, default 5).
+SHARE_CHECK_INTERVAL=5
+
+# --- Schedule ---
+# The launchd agent starts the script every hour; a run that ends ok is
+# followed by skipped-recent runs until it is this many x 24 hours old
+# (whole 24-hour periods, not calendar days). 0 runs every time
+# (optional, default 7). --force bypasses it.
+#MIRROR_INTERVAL_DAYS=7
+
+# --- Preflight checks (optional) ---
+# A bash array of strings, one per check, run in order before anything is
+# mounted. Each string is a command and its arguments, split on whitespace,
+# so an argument can't contain a space. The first check that doesn't exit 0
+# decides and later ones don't run. Exit 1: the run is skipped quietly. Any
+# other code, or a command that can't be run: the run fails and notifies.
+# All exit 0: the run goes ahead. Unset or empty: no checks.
+# --skip-preflight-check and --force bypass them all. A relative path is
+# relative to the script's directory.
+#
+# Network path, then download speed: skip on a hotspot or cellular link, then
+# unless the download is at least 50 Mbit/s. List download-speed.sh after
+# network-path.sh: it moves a few hundred MB per test, which a hotspot shouldn't
+# pay for.
+#PREFLIGHT_CHECKS=(
+#    "preflight-checks/network-path.sh"
+#    "preflight-checks/download-speed.sh 50"
+#)
+#
+# The dock check: the run goes ahead only while this MAC address appears in
+# `ifconfig -a`. Find the dock's address there while docked.
+#PREFLIGHT_CHECKS=("preflight-checks/dock-connected.sh aa:bb:cc:dd:ee:ff")
+
+# --- osxphotos (optional) ---
+# What uvx installs osxphotos from: a PyPI pin such as osxphotos==0.77.2, or
+# git+https://...@<tag>. Unset: the script's pinned default.
+#OSXPHOTOS_SOURCE=""
+# The osxphotos TOML config to load. Unset: osxphotos.toml in the repo.
+#OSXPHOTOS_CONFIG=""
+
+# --- Notifications ---
+# Seconds to wait for osascript to post a failure notification (optional,
+# default 10).
+NOTIFY_TIMEOUT=10
+
+# --- Application Directories ---
+# The log and the osxphotos export database live here.
+APP_DIR="$HOME/Library/Application Support/osxphotos-nas-mirror"
+LOG_FILE="$APP_DIR/osxphotos-nas-mirror.log"
+OSXPHOTOS_EXPORT_DB="$APP_DIR/osxphotos_export.db"
