@@ -4,7 +4,7 @@ Issues and pull requests are welcome, but I promise nothing. The tool works for 
 
 There are no releases or tags yet. Only `main` is maintained.
 
-`make test` must pass. It runs shellcheck, `tests/mirror-run.sh`, the preflight check tests and `tests/install.sh`. The tests never touch a real Photos library or share. They run the script with a test conf and stub commands on `PATH`, and check only the exit code, the outcome line, the stubs' recorded arguments and the files written. Never point a test at your real conf.
+`make test` must pass. It runs shellcheck, a jq check of the example dashboard, `tests/mirror-run.sh`, the preflight check tests and `tests/install.sh`. The tests never touch a real Photos library or share. They run the script with a test conf and stub commands on `PATH`, and check only the exit code, the outcome line, the stubs' recorded arguments and the files written. Never point a test at your real conf.
 
 ## For the maintainer
 
