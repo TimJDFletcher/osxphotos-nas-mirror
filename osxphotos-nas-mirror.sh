@@ -403,6 +403,19 @@ log "Share mounted at $EXPORT_DIR."
 # 3. RUN OSXPHOTOS EXPORT
 log "Starting photo library export..."
 
+# osxphotos' output, stdout and stderr, a line or two a photo with verbose =
+# true, goes to this run's export log in exports/, not to the run log, which
+# gets a line naming it and, once osxphotos exits, its summary. Before the
+# new export log is written, the oldest are deleted.
+EXPORT_LOG_DIR="$APP_DIR/exports"
+if ! mkdir -p "$EXPORT_LOG_DIR"; then
+    log "ERROR: Cannot create $EXPORT_LOG_DIR for the export log."
+    finish export-failed
+fi
+prune_export_logs
+export_log="$EXPORT_LOG_DIR/$RUN_STARTED.log"
+log "Export log: $export_log"
+
 # osxphotos runs through uv, in its own Python 3.13 environment, pinned to a
 # known version: Homebrew's formula broke when Homebrew's cffi dropped
 # Python 3.13, and a mirror shouldn't upgrade its exporter between runs.
@@ -421,23 +434,10 @@ log "Starting photo library export..."
 # share-lost. The export is polled every second, so one that finishes adds at
 # most a second to the run. The poll's sleep doesn't get the lock's
 # descriptor, so a killed run's last sleep doesn't hold the lock.
-#
-# osxphotos' output, stdout and stderr, a line or two a photo with verbose =
-# true, goes to this run's export log in exports/, not to the run log, which
-# gets a line naming it and, once osxphotos exits, its summary. Before the
-# new export log is written, the oldest are deleted.
 share_lost() {
     log "ERROR: The share is no longer mounted at $EXPORT_DIR. $1"
     finish share-lost
 }
-EXPORT_LOG_DIR="$APP_DIR/exports"
-if ! mkdir -p "$EXPORT_LOG_DIR"; then
-    log "ERROR: Cannot create $EXPORT_LOG_DIR for the export log."
-    finish export-failed
-fi
-prune_export_logs
-export_log="$EXPORT_LOG_DIR/$RUN_STARTED.log"
-log "Export log: $export_log"
 default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@v0.77.2-tim.3
 uvx --python 3.13 \
     --from "${OSXPHOTOS_SOURCE:-$default_osxphotos_source}" \
