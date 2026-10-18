@@ -67,7 +67,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
     * `OSXPHOTOS_SOURCE` (optional): what `uvx --from` installs osxphotos from, such as `osxphotos==0.77.2` or `git+https://...@<tag>`. Unset, the script's pinned default is used. Python stays 3.13.
     * `OSXPHOTOS_CONFIG` (optional): the osxphotos TOML to load. Unset, the repo's `osxphotos.toml`.
     * `LOCK_FILE` (optional): the run lock's file (see "Outcomes", `skipped-locked`). Unset, `run.lock` in the app directory. It must be an absolute path, or the run ends `usage-error`.
-    * `METRICS_TEXTFILE` (optional): a Prometheus textfile for node_exporter, written at the end of every run (see "Metrics"). Unset, no metrics.
+    * `METRICS_TEXTFILE` (optional): a Prometheus textfile for node_exporter, written at the end of every run (see "Metrics"). Unset, no metrics. It must be an absolute path; a relative one is logged as a warning and no textfile is written, and the outcome doesn't change.
 
     On a laptop, set a preflight check. `nas-rtt.sh` needs no MAC address and no swift; use the dock check if you dock. Without one, every hourly attempt away from home, once the weekly gate opens, ends `mount-failed` with a notification.
 
@@ -147,7 +147,7 @@ Every metric is a gauge with `# HELP` and `# TYPE` lines, named with the prefix 
 
 A run that doesn't update a metric carries its last value over from the file as it was, so a `skipped-recent` run changes only the run timestamp, the outcome series, the stamp and the database size, and the export's counts stay those of the last export that printed its summary.
 
-`mirror_files` and `mirror_bytes` come from the export database, read with the system `sqlite3`, read-only, after the export, not from the share (no `du` or `find` over SMB). They count the files this run's export wrote or found up to date, which are the files cleanup leaves on the share, and add up their sizes as osxphotos recorded them when it last wrote each one. They leave out files cleanup deleted and photos gone from the library, which stay in the database for good, and also a file osxphotos reported missing this run that an earlier run left on the share. Files you put on the share yourself aren't counted either. `osxphotos-nas-mirror.sh` (`mirror_from_export_db`) has the details.
+`mirror_files` and `mirror_bytes` come from the export database, read with the system `sqlite3` (opened `immutable`, which is read-only) after the export, not from the share (no `du` or `find` over SMB). They count the files this run's export wrote or found up to date, which are the files cleanup leaves on the share, and add up their sizes as osxphotos recorded them when it last wrote each one. They leave out files cleanup deleted and photos gone from the library, which stay in the database for good. They also miss some files cleanup keeps: a file osxphotos reported missing this run that an earlier run left on the share, a file whose export failed (the summary's `error` count), and sidecars, if your osxphotos config writes them (osxphotos records no history for sidecars). Files you put on the share yourself aren't counted either. `osxphotos-nas-mirror.sh` (`mirror_from_export_db`) has the details.
 
 Two example alerting rules:
 
