@@ -776,6 +776,18 @@ check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
 check "$(grep -c '^old line ' "$fake/app/osxphotos-nas-mirror.log")" 20 \
     "a run log under 10,000 lines keeps every earlier line"
 
+# The run holding the lock may be writing to the run log, so a run that finds
+# the lock held leaves it alone; the holder trims it when it ends.
+setup run-log-locked
+old_run_log 10050
+hold_lock "$fake/run.lock"
+run
+kill "$holder" 2> /dev/null || true
+wait "$holder" 2> /dev/null || true
+check "$(outcome)" skipped-locked "a run that finds the lock held ends skipped-locked"
+check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
+    "a run that finds the lock held does not trim the run log"
+
 # A skipped run trims too. Here the app directory is read-only, so the trim
 # can't write its new file.
 setup run-log-trim-fails
