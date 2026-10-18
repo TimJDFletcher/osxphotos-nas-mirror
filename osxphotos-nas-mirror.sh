@@ -196,8 +196,8 @@ esac
 # print "Terminated" on stderr, which under launchd is the log, hence the
 # 2> /dev/null on wait. osxphotos is uv's child, not ours, so it is waited for
 # by polling, for up to 5 seconds; one that outlives that keeps the lock.
-# (launchd gives a job 20 seconds to exit after SIGTERM, and finish may
-# still need NOTIFY_TIMEOUT seconds after this.)
+# (launchd sends SIGKILL ExitTimeOut seconds after SIGTERM, 20 by default,
+# and finish may still need NOTIFY_TIMEOUT seconds after this.)
 stop_export() {
     local children child i
     [ -n "${export_pid:-}" ] || return 0

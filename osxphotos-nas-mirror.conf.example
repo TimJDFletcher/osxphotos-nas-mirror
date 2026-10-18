@@ -59,9 +59,8 @@ SHARE_CHECK_INTERVAL=5
 # --- Run lock (optional) ---
 # The file the run lock is taken on. One run at a time: a run that finds the
 # lock held, by another run or by the export of one, ends skipped-locked.
-# Unset: osxphotos-nas-mirror.lock in the per-user temporary directory
-# (getconf DARWIN_USER_TEMP_DIR), which macOS empties at boot. Its directory
-# must be yours and writable by nobody else.
+# The lock ends with the run and its export, so a file left behind never
+# blocks a run. An absolute path. Unset: run.lock in APP_DIR.
 #LOCK_FILE=""
 
 # --- Notifications ---

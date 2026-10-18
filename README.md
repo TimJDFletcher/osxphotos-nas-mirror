@@ -66,7 +66,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
     * `PREFLIGHT_CHECKS` (optional): a bash array of strings, one per check, run in order before anything is mounted. Each string is split on whitespace into a command and its arguments, so an argument can't contain a space. The first check that doesn't exit 0 decides and later ones don't run: exit 1 ends the run `skipped-preflight-check`, and any other code ends it `preflight-check-failed`. If every check exits 0 the run goes ahead. A command path containing a `/` that isn't absolute is relative to the script's directory. Unset or empty, every run goes ahead. For example, `PREFLIGHT_CHECKS=("preflight-checks/network-path.sh" "preflight-checks/download-speed.sh 50")`. For the dock check, use the MAC address of the dock's Ethernet adapter, found in `ifconfig -a` while docked: `PREFLIGHT_CHECKS=("preflight-checks/dock-connected.sh aa:bb:cc:dd:ee:ff")`.
     * `OSXPHOTOS_SOURCE` (optional): what `uvx --from` installs osxphotos from, such as `osxphotos==0.77.2` or `git+https://...@<tag>`. Unset, the script's pinned default is used. Python stays 3.13.
     * `OSXPHOTOS_CONFIG` (optional): the osxphotos TOML to load. Unset, the repo's `osxphotos.toml`.
-    * `LOCK_FILE` (optional): the run lock's file (see "Outcomes", `skipped-locked`). Unset, `osxphotos-nas-mirror.lock` in your per-user temporary directory (`getconf DARWIN_USER_TEMP_DIR`), which macOS empties at boot. Its directory must be yours and writable by nobody else, or the run ends `usage-error`.
+    * `LOCK_FILE` (optional): the run lock's file (see "Outcomes", `skipped-locked`). Unset, `run.lock` in the app directory. It must be an absolute path, or the run ends `usage-error`.
 
     On a laptop, set a preflight check. `nas-rtt.sh` needs no MAC address and no swift; use the dock check if you dock. Without one, every hourly attempt away from home, once the weekly gate opens, ends `mount-failed` with a notification.
 
@@ -129,21 +129,19 @@ Every run ends with one `outcome=<name>` line as the last line of its log, and e
 | `ok` | 0 | Exported, and the export database was copied to the share. |
 | `skipped-preflight-check` | 0 | A preflight check exited 1: this run is not wanted (for the dock check, the dock is absent). The log names the check. Later checks did not run. Nothing was mounted or exported. |
 | `skipped-recent` | 0 | The last good run was less than `MIRROR_INTERVAL_DAYS` x 24 hours ago (see Automation). The log says when. Nothing was mounted or exported, and the preflight checks did not run. `--force` bypasses this. |
-| `skipped-locked` | 0 | Another run, or the export of one, was still in progress. A run holds a kernel lock (`flock`) on `LOCK_FILE` (by default `osxphotos-nas-mirror.lock` in the per-user temporary directory), and osxphotos inherits it, so the lock stays held while the export runs, even if the script that started it was killed. A reboot clears it. Nothing was mounted or exported. |
-| `usage-error` | 64 | An unknown argument, a `MIRROR_INTERVAL_DAYS` that is not a whole number, or a conf that is missing, unreadable, fails to load, or leaves a setting unset, or a lock file that can't be opened or locked, or whose directory is missing, not yours, or writable by others. Nothing was mounted or exported. |
+| `skipped-locked` | 0 | Another run, or the export of one, was still in progress. A run holds a kernel lock (`flock`) on `LOCK_FILE` (by default `run.lock` in the app directory), and osxphotos inherits it, so the lock stays held while the export runs, even if the script that started it was killed. The lock ends when its last holder exits, so a lock file left behind never blocks a run. Nothing was mounted or exported. |
+| `usage-error` | 64 | An unknown argument, a `MIRROR_INTERVAL_DAYS` that is not a whole number, or a conf that is missing, unreadable, fails to load, or leaves a setting unset, or a `LOCK_FILE` that is not an absolute path or can't be opened or locked. Nothing was mounted or exported. |
 | `mount-failed` | 69 | The share was not mounted after trying to mount it. |
 | `share-lost` | 69 | The share stopped being mounted during the export or before the database copy. osxphotos was stopped and the database was not copied. |
 | `preflight-check-failed` | 70 | A preflight check exited 2 or more, or could not be run (bash's 126 and 127). The log names the check and the code. Later checks did not run. Nothing was mounted or exported. |
 | `export-failed` | 70 | `osxphotos export` exited non-zero. The export database was not copied to the share. |
 | `db-copy-failed` | 74 | The export succeeded, but copying the export database to the share failed. |
-| `interrupted` | 75 | The run was stopped by SIGTERM (as launchd sends when the agent is unloaded or you log out), SIGINT (Ctrl-C) or SIGHUP. osxphotos was stopped and the export database was not copied. The next run picks up where this one stopped. |
+| `interrupted` | 75 | The run was stopped by SIGTERM (as launchd sends when the agent is unloaded or you log out), SIGINT (Ctrl-C) or SIGHUP. osxphotos was stopped and the export database was not copied. The next run picks up where this one stopped. A stop that arrives during a preflight check or a mount attempt takes effect once that ends. |
 | `no-credentials` | 78 | The share needed mounting, but the login keychain has no SMB password for `NAS_USER` at `NAS_HOSTNAME`. Nothing was mounted or exported. Connect to the share once in Finder and tick "Remember this password in my keychain". |
 
 Every outcome with a non-zero exit code also posts a macOS notification titled "osxphotos NAS mirror" (`Mirror run failed: <outcome>. See <log file>.`, or, with no log file, a pointer to the run's error output), through `osascript`. `ok`, `skipped-preflight-check`, `skipped-recent` and `skipped-locked` post none. If the notification can't be posted, or `osascript` takes longer than `NOTIFY_TIMEOUT` seconds (conf, default 10), the run logs a warning and its outcome is unchanged.
 
 When the conf is missing or unreadable, or leaves a setting unset, the run's lines, including the outcome, go to stderr instead of the log file.
-
-Upgrading from a version that used `lockf`: the run lock is no longer `run.lock` in the app directory. Nothing uses that file now, and you can delete it.
 
 ### Checking notifications
 
