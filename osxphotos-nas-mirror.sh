@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# log MESSAGE: a timestamped line to stdout and the log file. Before the conf
-# is loaded there is no log file, so the line goes to stderr instead.
+# log MESSAGE: a timestamped line to stdout and the run log. Before the conf
+# is loaded there is no run log, so the line goes to stderr instead.
 log() {
     local line
     line="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -25,7 +25,7 @@ bounded() {
     (sleep "$seconds" && kill "$pid") > /dev/null 2>&1 9>&- &
     watcher=$!
     # Killing the watcher below would otherwise make bash print
-    # "Terminated" on stderr, which under launchd is the log.
+    # "Terminated" on stderr, which under launchd is the run log.
     disown "$watcher"
     if wait "$pid"; then
         kill "$watcher" 2> /dev/null
@@ -70,7 +70,7 @@ EXPORT_LOGS_KEPT=8
 
 # trim_run_log: cut the run log to its last RUN_LOG_LINES - 1 lines, so that
 # with the outcome line, written next, it holds RUN_LOG_LINES. The trimmed
-# copy replaces the log in one rename, so a trim that fails leaves it whole,
+# copy replaces the run log in one rename, so a trim that fails leaves it whole,
 # and is a warning. Under launchd the script's stderr is still the old file
 # after the rename, but nothing is written to it after the outcome.
 trim_run_log() {
@@ -86,7 +86,7 @@ trim_run_log() {
 }
 
 # finish OUTCOME: end the run. Every run ends here, with one outcome=<name>
-# line as the last line of its log and the outcome's exit code (sysexits.h).
+# line as the last line of the run log and the outcome's exit code (sysexits.h).
 # A failing run's notification names the log that explains it: an outcome
 # that stopped or followed an export names that export's log, any other the
 # run log. The run log is trimmed first, so the outcome line is never cut.
@@ -118,7 +118,7 @@ finish() {
         if [ -n "$see" ]; then
             notify "Mirror run failed: $1. See $see."
         else
-            notify "Mirror run failed: $1. See this run's error output (under launchd, the agent's log)."
+            notify "Mirror run failed: $1. See this run's error output (under launchd, the run log)."
         fi
     fi
     if [ -n "${LOG_FILE:-}" ] && [ "$1" != skipped-locked ]; then
@@ -153,7 +153,7 @@ fi
 for setting in NAS_USER NAS_HOSTNAME NAS_SHARE \
     APP_DIR LOG_FILE OSXPHOTOS_EXPORT_DB; do
     if [ -z "${!setting:-}" ]; then
-        # The log file may be the missing setting, so report on stderr.
+        # The run log may be the missing setting, so report on stderr.
         LOG_FILE=
         log "ERROR: Configuration file $CONF does not set $setting."
         finish usage-error
@@ -232,7 +232,7 @@ esac
 
 # stop_export: stop osxphotos, if it was started, and wait for it. uv runs
 # osxphotos as its child: stop that, then uv. Reaping a killed job makes bash
-# print "Terminated" on stderr, which under launchd is the log, hence the
+# print "Terminated" on stderr, which under launchd is the run log, hence the
 # 2> /dev/null on wait. osxphotos is uv's child, not ours, so it is waited for
 # by polling, for up to 5 seconds; one that outlives that keeps the lock.
 # (launchd sends SIGKILL ExitTimeOut seconds after SIGTERM, 20 by default,

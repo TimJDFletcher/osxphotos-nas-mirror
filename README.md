@@ -113,7 +113,7 @@ tail -f osxphotos-nas-mirror.log
 tail -f "exports/$(ls exports | tail -n 1)"
 ```
 
-An existing install needs nothing done: its next run trims the old log, which held osxphotos' output too, down to 10,000 lines.
+An existing install needs nothing done: its next run trims the old run log, which held osxphotos' output too, down to 10,000 lines.
 
 ## Automation
 
@@ -139,7 +139,7 @@ Every run ends with one `outcome=<name>` line as the last line of the run log, a
 |---|---|---|
 | `ok` | 0 | Exported, and the export database was copied to the share. |
 | `skipped-preflight-check` | 0 | A preflight check exited 1: this run is not wanted (for the dock check, the dock is absent). The run log names the check. Later checks did not run. Nothing was mounted or exported. |
-| `skipped-recent` | 0 | The last good run was less than `MIRROR_INTERVAL_DAYS` x 24 hours ago (see Automation). The log says when. Nothing was mounted or exported, and the preflight checks did not run. `--force` bypasses this. |
+| `skipped-recent` | 0 | The last good run was less than `MIRROR_INTERVAL_DAYS` x 24 hours ago (see Automation). The run log says when. Nothing was mounted or exported, and the preflight checks did not run. `--force` bypasses this. |
 | `skipped-locked` | 0 | Another run, or the export of one, was still in progress. A run holds a kernel lock (`flock`) on `LOCK_FILE` (by default `run.lock` in the app directory), and osxphotos inherits it, so the lock stays held while the export runs, even if the script that started it was killed. The lock ends when its last holder exits, so a lock file left behind never blocks a run. Nothing was mounted or exported. |
 | `usage-error` | 64 | An unknown argument, a `MIRROR_INTERVAL_DAYS` that is not a whole number, or a conf that is missing, unreadable, fails to load, or leaves a setting unset, or a `LOCK_FILE` that is not an absolute path or can't be opened or locked. Nothing was mounted or exported. |
 | `mount-failed` | 69 | The share was not mounted after trying to mount it. |

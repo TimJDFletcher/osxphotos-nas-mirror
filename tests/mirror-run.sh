@@ -9,7 +9,7 @@
 # a stub ifconfig. Stub behaviour is switched per case by marker files in the
 # case's directory ($FAKE_DIR).
 #
-# Run by `make test`. With VERBOSE=1 every case prints the run's log.
+# Run by `make test`. With VERBOSE=1 every case prints the run's output (its run log lines).
 #
 # POSIX sh only.
 set -eu
@@ -362,7 +362,7 @@ run
 check "$(outcome)" skipped-preflight-check "a first check that exits 1 ends the run skipped-preflight-check"
 check "$(called second-check)" none "a first check that exits 1 stops the second from running"
 check "$(grep -c 'preflight-check.sh first-arg exited 1' "$fake/app/osxphotos-nas-mirror.log")" 1 \
-    "the log names the first check as the one that decided"
+    "the run log names the first check as the one that decided"
 
 setup first-check-fails
 add_second_check
@@ -379,7 +379,7 @@ check "$(outcome)" preflight-check-failed "a second check that exits 2 fails the
 check "$(called preflight-check)" called "the first check ran before the second failed"
 check "$(called mount-volume uvx)" none "a failing second check mounts nothing and exports nothing"
 check "$(grep -c 'second-check.sh second-arg other-arg exited 2' "$fake/app/osxphotos-nas-mirror.log")" 1 \
-    "the log names the second check as the one that decided"
+    "the run log names the second check as the one that decided"
 
 setup blank-check
 echo 'PREFLIGHT_CHECKS=("   ")' >> "$fake/test.conf"
@@ -602,15 +602,15 @@ check "$(notified usage-error)" yes "unknown argument posts a notification namin
 check "$(called uvx)" none \
     "unknown argument does not run osxphotos"
 
-# With no conf there is no log file, so the outcome goes to stderr.
+# With no conf there is no run log, so the outcome goes to stderr.
 setup missing-conf
 rm "$fake/test.conf"
 run
 check "$rc" 64 "missing conf exits 64"
 check "$(grep -c 'outcome=usage-error' "$fake/stderr")" 1 "missing conf reports outcome=usage-error on stderr"
 check "$(notified usage-error)" yes "missing conf posts a notification naming usage-error"
-check "$(grep -c "See this run's error output (under launchd, the agent's log)\." "$fake/osascript-args.log")" 1 \
-    "with no log file, the notification points at the run's error output"
+check "$(grep -c "See this run's error output (under launchd, the run log)\." "$fake/osascript-args.log")" 1 \
+    "with no run log, the notification points at the run's error output"
 check "$(called mount-volume uvx)" none \
     "missing conf neither mounts the share nor runs osxphotos"
 
