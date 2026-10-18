@@ -47,16 +47,27 @@ echo "tests: the script ran osxphotos directly, not through uvx" >&2
 exit 99
 STUB
 # uvx: the script runs osxphotos through uv, so this stub stands in for both.
+# It prints what osxphotos export prints with verbose = true to a file (not a
+# terminal): a line or two per photo, then the closing summary and cleanup
+# lines, as osxphotos/cli/export.py at the pinned tag writes them through
+# rich with the markup stripped. A failed or stopped export prints no summary.
 cat > "$work/bin/uvx" <<'STUB'
 #!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done > "$FAKE_DIR/uvx-args.log"
 echo called >> "$FAKE_DIR/uvx-calls.log"
-if [ -e "$FAKE_DIR/export-fails" ]; then echo "osxphotos: export failed" >&2; exit 1; fi
 db=
+for a in "$@"; do dest=$a; done
 while [ $# -gt 0 ]; do
     if [ "$1" = --exportdb ]; then db=$2; fi
     shift
 done
+echo "Exporting 3 photos to $dest..."
+for n in 1 2 3; do
+    echo "Exporting IMG_000$n.HEIC (IMG_000$n.HEIC) ($n/3)"
+done
+echo "Exported new file $dest/2026/10/18/IMG_0001.HEIC"
+echo "Exported updated file $dest/2026/10/18/IMG_0002.HEIC"
+if [ -e "$FAKE_DIR/export-fails" ]; then echo "osxphotos: export failed" >&2; exit 1; fi
 [ -z "$db" ] || echo "fake export db" > "$db"
 # export-runs: a long export. It writes its pid to export.pid and runs until
 # the case creates export-stop (at most 30 seconds).
@@ -75,7 +86,13 @@ if [ -e "$FAKE_DIR/share-drops" ]; then
 fi
 # share-drops-at-end: the share goes just as the export finishes.
 [ ! -e "$FAKE_DIR/share-drops-at-end" ] || : > "$FAKE_DIR/mounts"
-echo "Exported: 3 photos"
+# no-summary: an export that ends without its summary.
+[ ! -e "$FAKE_DIR/no-summary" ] || exit 0
+echo "Processed: 3 photos, exported: 1, updated: 1, skipped: 1, updated EXIF data: 0, missing: 0, error: 0, touched date: 2"
+echo "Elapsed time: 0:00:01"
+echo "Cleaning up $dest"
+echo "Deleting $dest/2026/10/17/IMG_0000.HEIC"
+echo "Deleted: 1 file, 0 directories"
 STUB
 # osascript: a script that mounts a volume stands in for Finder's mount,
 # under the case's own Volumes directory; anything else is a notification.
@@ -505,6 +522,10 @@ check "$(outcome)" mount-failed "share that will not mount ends with outcome=mou
 check "$(called uvx)" none \
     "share that will not mount does not run osxphotos"
 check "$(notified mount-failed)" yes "share that will not mount posts a notification naming mount-failed"
+check "$(grep -c "See $fake/app/osxphotos-nas-mirror.log\." "$fake/osascript-args.log")" 1 \
+    "a run that fails before the export names the run log in its notification"
+check "$(ls "$fake/app/exports" 2> /dev/null | wc -l | tr -d ' ')" 0 \
+    "a run that fails before the export writes no export log"
 
 setup mount-hangs
 : > "$fake/mount-hangs"
@@ -535,8 +556,6 @@ run
 check "$rc" 70 "failed export exits 70"
 check "$(outcome)" export-failed "failed export ends with outcome=export-failed"
 check "$(notified export-failed)" yes "failed export posts a notification naming export-failed"
-check "$(grep -c "See $fake/app/osxphotos-nas-mirror.log\." "$fake/osascript-args.log")" 1 \
-    "with a log file, the notification names it"
 check "$(grep -c 'Terminated' "$fake/stderr")" 0 \
     "posting a notification leaves no job-control noise on stderr"
 check "$([ -e "$fake/Volumes/photos/.osxphotos_export.db" ] && echo copied || echo absent)" absent \
@@ -642,6 +661,136 @@ check "$(outcome)" export-failed "a notification that hangs does not change the 
 check "$(grep -c 'WARNING: Could not post a notification' "$fake/app/osxphotos-nas-mirror.log")" 1 \
     "a notification that hangs is logged as a warning"
 
+# --- the run log (LOG_FILE) and the export logs (exports/ in the app directory)
+
+# export_logs: the case's export logs, by name, oldest first.
+export_logs() {
+    ls "$fake/app/exports" 2> /dev/null || true
+}
+
+# named_export_log: the export log this case's run log points at.
+named_export_log() {
+    sed -n 's/.*Export log: //p' "$fake/app/osxphotos-nas-mirror.log" | tail -n 1
+}
+
+# old_run_log N: a run log of N lines, "old line 1" to "old line N".
+old_run_log() {
+    mkdir -p "$fake/app"
+    seq 1 "$1" | sed 's/^/old line /' > "$fake/app/osxphotos-nas-mirror.log"
+}
+
+# old_export_logs: nine export logs from earlier runs, a day apart.
+old_export_logs() {
+    mkdir -p "$fake/app/exports"
+    for d in 1 2 3 4 5 6 7 8 9; do
+        echo "an earlier export" > "$fake/app/exports/2020-01-0${d}T00-00-00.log"
+    done
+}
+
+setup logs-ok
+run
+run_log=$fake/app/osxphotos-nas-mirror.log
+export_log=$(named_export_log)
+check "$(outcome)" ok "a run that exports ends ok"
+check "$(dirname "$export_log")" "$fake/app/exports" \
+    "the run log names an export log in exports/ in the app directory"
+check "$(basename "$export_log" | grep -c -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}\.log$')" 1 \
+    "the export log is named after the run's start time, with no colons"
+check "$(export_logs)" "$(basename "$export_log")" "a run that exports writes one export log"
+check "$(grep -c 'Exporting IMG_0001.HEIC' "$export_log")" 1 "the export log holds osxphotos' output"
+check "$(grep -c -e 'Exporting IMG_' -e 'Exported new file' "$run_log")" 0 \
+    "the run log holds none of osxphotos' per-photo lines"
+check "$(grep -c 'Processed: 3 photos, exported: 1, updated: 1, skipped: 1, updated EXIF data: 0, missing: 0, error: 0, touched date: 2$' "$run_log")" 1 \
+    "the run log has osxphotos' summary line"
+check "$(grep -c 'Deleted: 1 file, 0 directories$' "$run_log")" 1 \
+    "the run log has osxphotos' cleanup line"
+
+setup logs-no-summary
+: > "$fake/no-summary"
+run
+check "$(outcome)" ok "an export that prints no summary still ends ok"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "an export that prints no summary leaves a line in the run log saying so"
+
+setup logs-export-failed
+: > "$fake/export-fails"
+run
+export_log=$(named_export_log)
+check "$(outcome)" export-failed "a failed export ends export-failed"
+check "$(grep -c "See $export_log\." "$fake/osascript-args.log")" 1 \
+    "export-failed names the run's export log in its notification"
+check "$(grep -c 'osxphotos: export failed' "$export_log")" 1 \
+    "the export log holds osxphotos' error output"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a failed export with no summary says so in the run log"
+
+setup logs-share-lost
+: > "$fake/share-drops"
+run
+export_log=$(named_export_log)
+check "$(outcome)" share-lost "a share lost during the export ends share-lost"
+check "$(grep -c "See $export_log\." "$fake/osascript-args.log")" 1 \
+    "share-lost names the run's export log in its notification"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "an export stopped by the watchdog says in the run log that it printed no summary"
+
+setup logs-pruned
+old_export_logs
+run
+check "$(export_logs | wc -l | tr -d ' ')" 8 "with 9 export logs, a run that exports leaves 8"
+check "$(export_logs | head -n 7)" "$(for d in 3 4 5 6 7 8 9; do echo "2020-01-0${d}T00-00-00.log"; done)" \
+    "a run that exports keeps the 7 newest earlier export logs"
+check "$(export_logs | tail -n 1)" "$(basename "$(named_export_log)")" \
+    "a run that exports keeps its own export log"
+
+setup logs-skipped-recent
+old_export_logs
+touch "$fake/app/last-ok"
+run
+check "$(outcome)" skipped-recent "a run with a fresh stamp ends skipped-recent"
+check "$(export_logs | wc -l | tr -d ' ')" 9 "a skipped-recent run neither writes nor deletes export logs"
+
+setup logs-skipped-preflight-check
+old_export_logs
+echo 1 > "$fake/preflight-check-exit"
+run
+check "$(export_logs | wc -l | tr -d ' ')" 9 "a skipped-preflight-check run neither writes nor deletes export logs"
+
+setup run-log-trimmed
+old_run_log 10050
+run
+run_log=$fake/app/osxphotos-nas-mirror.log
+old=$(grep -c '^old line ' "$run_log" || true)
+check "$(wc -l < "$run_log" | tr -d ' ')" 10000 "a run log longer than 10,000 lines is trimmed to 10,000"
+check "$(outcome)" ok "the trimmed run log ends with the outcome"
+check "$(head -n 1 "$run_log")" "old line $((10051 - old))" \
+    "the trimmed run log starts where its last 10,000 lines start"
+check "$(grep -n '^old line 10050$' "$run_log" | cut -d: -f1)" "$old" \
+    "the trimmed run log keeps the earlier lines in one piece, before this run's"
+
+setup run-log-short
+old_run_log 20
+run
+check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
+    "a run log under 10,000 lines is not trimmed"
+check "$(grep -c '^old line ' "$fake/app/osxphotos-nas-mirror.log")" 20 \
+    "a run log under 10,000 lines keeps every earlier line"
+
+# A skipped run trims too. Here the app directory is read-only, so the trim
+# can't write its new file.
+setup run-log-trim-fails
+old_run_log 10050
+touch "$fake/app/last-ok"
+chmod a-w "$fake/app"
+run
+chmod u+w "$fake/app"
+check "$rc" 0 "a run log that cannot be trimmed does not change the exit code"
+check "$(outcome)" skipped-recent "a run log that cannot be trimmed does not change the outcome"
+check "$(grep -c 'WARNING: Could not trim the run log' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a run log that cannot be trimmed is logged as a warning"
+check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
+    "a run log that cannot be trimmed is left whole"
+
 # --- the run lock: a kernel lock (flock) on LOCK_FILE, held by the run and
 # by the export it starts
 
@@ -705,6 +854,10 @@ check "$(alive "$export_pid")" gone "SIGTERM to a run stops its export"
 check "$rc" 75 "a run stopped with SIGTERM exits 75"
 check "$(outcome)" interrupted "a run stopped with SIGTERM ends with outcome=interrupted"
 check "$(notified interrupted)" yes "a run stopped with SIGTERM posts a notification naming interrupted"
+check "$(grep -c "See $(named_export_log)\." "$fake/osascript-args.log")" 1 \
+    "a run stopped mid-export names its export log in the notification"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a run stopped mid-export says in the run log that osxphotos printed no summary"
 check "$([ -e "$fake/Volumes/photos/.osxphotos_export.db" ] && echo copied || echo absent)" absent \
     "a run stopped with SIGTERM does not copy the export database"
 check "$([ -e "$fake/app/last-ok" ] && echo yes || echo no)" no "a run stopped with SIGTERM writes no stamp"
