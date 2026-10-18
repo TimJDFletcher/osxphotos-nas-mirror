@@ -1,0 +1,1239 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Photos library mirror runs: health first, with big status panels and the outcome history.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "osxphotos-nas-mirror",
+      "type": "link",
+      "icon": "doc",
+      "url": "https://github.com/TimJDFletcher/osxphotos-nas-mirror#metrics",
+      "targetBlank": true
+    }
+  ],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Since the last good run",
+      "description": "Time since the last ok run ended (the last-ok stamp). Green under 7 days, the gap the recency gate allows; amber to 8 days; red after.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(time() - max by (instance) (last_over_time(osxphotos_nas_mirror_last_ok_timestamp_seconds{instance=~\"$instance\"}[30d]))) / 86400",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": false,
+          "instant": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: days",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 7
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 44
+        }
+      },
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 7,
+        "h": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Last outcome",
+      "description": "The outcome the last run ended with (osxphotos_nas_mirror_last_run_outcome).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (instance) (last_over_time((max by (instance) (\n    osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-recent\"} * 1\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-locked\"} * 2\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-preflight-check\"} * 3\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"ok\"} * 4\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"mount-failed\"} * 5\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"share-lost\"} * 6\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"export-failed\"} * 7\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"preflight-check-failed\"} * 8\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"db-copy-failed\"} * 9\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"interrupted\"} * 10\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"no-credentials\"} * 11\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"usage-error\"} * 12\n  ))[1d:]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": false,
+          "instant": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "skipped-recent",
+                  "color": "#5a6b7f",
+                  "index": 0
+                },
+                "2": {
+                  "text": "skipped-locked",
+                  "color": "#7f8fa3",
+                  "index": 1
+                },
+                "3": {
+                  "text": "skipped-preflight-check",
+                  "color": "#8f7fb8",
+                  "index": 2
+                },
+                "4": {
+                  "text": "ok",
+                  "color": "green",
+                  "index": 3
+                },
+                "5": {
+                  "text": "mount-failed",
+                  "color": "orange",
+                  "index": 4
+                },
+                "6": {
+                  "text": "share-lost",
+                  "color": "red",
+                  "index": 5
+                },
+                "7": {
+                  "text": "export-failed",
+                  "color": "red",
+                  "index": 6
+                },
+                "8": {
+                  "text": "preflight-check-failed",
+                  "color": "orange",
+                  "index": 7
+                },
+                "9": {
+                  "text": "db-copy-failed",
+                  "color": "red",
+                  "index": 8
+                },
+                "10": {
+                  "text": "interrupted",
+                  "color": "#EAB839",
+                  "index": 9
+                },
+                "11": {
+                  "text": "no-credentials",
+                  "color": "dark-red",
+                  "index": 10
+                },
+                "12": {
+                  "text": "usage-error",
+                  "color": "dark-red",
+                  "index": 11
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 26
+        }
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 7,
+        "y": 0,
+        "w": 7,
+        "h": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Files in the mirror",
+      "description": "Files on the share as of the last ok run (mirror_files).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (instance) (last_over_time(osxphotos_nas_mirror_mirror_files{instance=~\"$instance\"}[1d]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": false,
+          "instant": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 30
+        }
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 14,
+        "y": 0,
+        "w": 5,
+        "h": 6
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Mirror size",
+      "description": "The size of the files in the mirror as of the last ok run (mirror_bytes).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (instance) (last_over_time(osxphotos_nas_mirror_mirror_bytes{instance=~\"$instance\"}[1d]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": false,
+          "instant": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [],
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "text": {
+          "valueSize": 30
+        }
+      },
+      "id": 4,
+      "gridPos": {
+        "x": 19,
+        "y": 0,
+        "w": 5,
+        "h": 6
+      }
+    },
+    {
+      "type": "state-timeline",
+      "title": "Outcome history",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The outcome of the last run, one row per Mac. Where an interval on screen holds more than one, the most notable is shown: a failure over ok, ok over a skip. Grey and purple are skipped runs, green ok, orange and red failures.",
+      "interval": "1m",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max_over_time((\nmax by (instance) (\n  osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-recent\"} * 1\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-locked\"} * 2\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-preflight-check\"} * 3\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"ok\"} * 4\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"mount-failed\"} * 5\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"share-lost\"} * 6\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"export-failed\"} * 7\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"preflight-check-failed\"} * 8\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"db-copy-failed\"} * 9\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"interrupted\"} * 10\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"no-credentials\"} * 11\n  or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"usage-error\"} * 12\n)\n)[$__interval:1m])",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "maxDataPoints": 200,
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "skipped-recent",
+                  "color": "#5a6b7f",
+                  "index": 0
+                },
+                "2": {
+                  "text": "skipped-locked",
+                  "color": "#7f8fa3",
+                  "index": 1
+                },
+                "3": {
+                  "text": "skipped-preflight-check",
+                  "color": "#8f7fb8",
+                  "index": 2
+                },
+                "4": {
+                  "text": "ok",
+                  "color": "green",
+                  "index": 3
+                },
+                "5": {
+                  "text": "mount-failed",
+                  "color": "orange",
+                  "index": 4
+                },
+                "6": {
+                  "text": "share-lost",
+                  "color": "red",
+                  "index": 5
+                },
+                "7": {
+                  "text": "export-failed",
+                  "color": "red",
+                  "index": 6
+                },
+                "8": {
+                  "text": "preflight-check-failed",
+                  "color": "orange",
+                  "index": 7
+                },
+                "9": {
+                  "text": "db-copy-failed",
+                  "color": "red",
+                  "index": 8
+                },
+                "10": {
+                  "text": "interrupted",
+                  "color": "#EAB839",
+                  "index": 9
+                },
+                "11": {
+                  "text": "no-credentials",
+                  "color": "dark-red",
+                  "index": 10
+                },
+                "12": {
+                  "text": "usage-error",
+                  "color": "dark-red",
+                  "index": 11
+                }
+              }
+            }
+          ],
+          "custom": {
+            "fillOpacity": 85,
+            "lineWidth": 0,
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.75,
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Age of the last good run",
+      "description": "Time since the last ok run ended (the last-ok stamp). Green under 7 days, the gap the recency gate allows; amber to 8 days; red after.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(time() - max by (instance) (last_over_time(osxphotos_nas_mirror_last_ok_timestamp_seconds{instance=~\"$instance\"}[30d]))) / 86400",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "suffix: days",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "line+area"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 7
+              },
+              {
+                "color": "red",
+                "value": 8
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 6,
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent runs that weren't skipped",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Every run in the time range that wasn't skipped (ok and the failures), newest first: when it ended, the Mac, its outcome and how long it took. Two such runs ending in the same hour show as one.",
+      "interval": "1h",
+      "maxDataPoints": 100000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome!~\"skipped-.*\"}[$__interval]) == 1\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))",
+          "legendFormat": "",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "1000 * last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome!~\"skipped-.*\"}[$__interval]) == 1)",
+          "legendFormat": "",
+          "refId": "B",
+          "range": true,
+          "instant": false,
+          "editorMode": "code",
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "last_over_time(osxphotos_nas_mirror_last_run_duration_seconds{instance=~\"$instance\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome!~\"skipped-.*\"}[$__interval]) == 1)",
+          "legendFormat": "",
+          "refId": "C",
+          "range": true,
+          "instant": false,
+          "editorMode": "code",
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "__name__": true
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "job": true,
+              "Value #A": true
+            },
+            "indexByName": {
+              "Value #B": 0,
+              "instance": 1,
+              "outcome": 2,
+              "Value #C": 3
+            },
+            "renameByName": {
+              "instance": "Mac",
+              "outcome": "Outcome",
+              "Value #B": "Ended",
+              "Value #C": "Duration"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Ended",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Outcome"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "color": "green",
+                        "index": 0
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": "skipped-.*",
+                      "result": {
+                        "color": "#7f8fa3",
+                        "index": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".+",
+                      "result": {
+                        "color": "red",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dtdurations"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Ended"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 190
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Ended",
+            "desc": true
+          }
+        ]
+      },
+      "id": 7,
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "row",
+      "title": "Exports",
+      "collapsed": false,
+      "panels": [],
+      "id": 8,
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Run duration",
+      "description": "How long the last run that wasn't skipped took, and its export. A short dip is a run that failed early, such as mount-failed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "osxphotos_nas_mirror_last_run_duration_seconds{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} run",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "osxphotos_nas_mirror_last_export_duration_seconds{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} export",
+          "refId": "B",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 8,
+        "h": 7
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Files exported, updated and removed per export",
+      "description": "From osxphotos' summary: new files exported, files updated and files cleanup removed from the share, one point per export.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "last_over_time(osxphotos_nas_mirror_last_export_files{instance=~\"$instance\", result=~\"exported|updated\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))",
+          "legendFormat": "{{instance}} {{result}}",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "last_over_time(osxphotos_nas_mirror_last_export_deleted_files{instance=~\"$instance\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))",
+          "legendFormat": "{{instance}} removed",
+          "refId": "B",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "points",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "always",
+            "pointSize": 9,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "interval": "1h",
+      "maxDataPoints": 100000,
+      "id": 10,
+      "gridPos": {
+        "x": 8,
+        "y": 21,
+        "w": 8,
+        "h": 7
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Export throughput",
+      "description": "Bytes the last ok export wrote (new and updated files) over its duration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "osxphotos_nas_mirror_last_export_bytes{instance=~\"$instance\"} / osxphotos_nas_mirror_last_export_duration_seconds{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} written",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 11,
+      "gridPos": {
+        "x": 16,
+        "y": 21,
+        "w": 8,
+        "h": 7
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Export database size",
+      "description": "export_db_bytes. It grows by a history row per file every export.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "osxphotos_nas_mirror_export_db_bytes{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decbytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 5
+      }
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": [
+    "osxphotos-nas-mirror",
+    "photos",
+    "backup"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "includeAll": false,
+        "multi": false,
+        "options": [],
+        "skipUrlSync": false
+      },
+      {
+        "name": "instance",
+        "label": "Mac",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(osxphotos_nas_mirror_last_run_timestamp_seconds, instance)",
+        "query": {
+          "query": "label_values(osxphotos_nas_mirror_last_run_timestamp_seconds, instance)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery",
+          "qryType": 1
+        },
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "includeAll": true,
+        "multi": true,
+        "hide": 0,
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "options": [],
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-14d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "osxphotos-nas-mirror",
+  "uid": null,
+  "version": 1,
+  "weekStart": ""
+}
