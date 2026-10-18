@@ -724,52 +724,39 @@ check "$(alive "$export_pid")" gone "SIGHUP to a run stops its export"
 check "$(outcome)" interrupted "a run stopped with SIGHUP ends with outcome=interrupted"
 : > "$fake/export-stop"
 
-# With no LOCK_FILE, the lock is in the per-user temporary directory, which
-# macOS empties at boot. This is the user's real lock file: a real run in
-# progress makes this run end skipped-locked, which uses the same file.
+# With no LOCK_FILE, the lock file is run.lock in the app directory.
 setup default-lock-file
 grep -v '^LOCK_FILE=' "$fake/test.conf" > "$fake/trimmed.conf"
 mv "$fake/trimmed.conf" "$fake/test.conf"
-default_lock=$(getconf DARWIN_USER_TEMP_DIR)osxphotos-nas-mirror.lock
 run
-check "$(outcome | grep -cx -e ok -e skipped-locked)" 1 "a run with no LOCK_FILE ends with an outcome"
-check "$([ -f "$default_lock" ] && echo present || echo absent)" present \
-    "with no LOCK_FILE, the lock file is in the per-user temporary directory"
+check "$(outcome)" ok "a run with no LOCK_FILE ends ok"
+check "$([ -f "$fake/app/run.lock" ] && echo present || echo absent)" present \
+    "with no LOCK_FILE, the lock file is run.lock in the app directory"
 
-setup lock-dir-writable-by-others
-mkdir -p "$fake/shared"
-chmod 777 "$fake/shared"
-echo 'LOCK_FILE="'"$fake"'/shared/run.lock"' >> "$fake/test.conf"
+setup lock-file-relative
+echo 'LOCK_FILE="run.lock"' >> "$fake/test.conf"
 run
-check "$rc" 64 "a lock directory writable by others exits 64"
-check "$(outcome)" usage-error "a lock directory writable by others ends with outcome=usage-error"
-check "$(grep -c 'writable by others' "$fake/app/osxphotos-nas-mirror.log")" 1 \
-    "a lock directory writable by others is logged"
-check "$(called mount-volume uvx)" none "a lock directory writable by others mounts nothing and exports nothing"
-check "$([ -e "$fake/shared/run.lock" ] && echo created || echo absent)" absent \
-    "a lock directory writable by others gets no lock file"
+check "$rc" 64 "a relative LOCK_FILE exits 64"
+check "$(outcome)" usage-error "a relative LOCK_FILE ends with outcome=usage-error"
+check "$(grep -c 'LOCK_FILE .* is not an absolute path' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a relative LOCK_FILE is logged"
+check "$(called mount-volume uvx)" none "a relative LOCK_FILE mounts nothing and exports nothing"
 
-setup lock-dir-group-writable
-mkdir -p "$fake/group"
-chmod 770 "$fake/group"
-echo 'LOCK_FILE="'"$fake"'/group/run.lock"' >> "$fake/test.conf"
+# A lock file that can't be opened: here, a directory.
+setup lock-file-is-a-directory
+mkdir -p "$fake/lock-dir"
+echo 'LOCK_FILE="'"$fake"'/lock-dir"' >> "$fake/test.conf"
 run
-check "$(outcome)" usage-error "a group-writable lock directory ends with outcome=usage-error"
-
-# / is root's. (Like the other permission cases, this needs a non-root user.)
-setup lock-dir-not-owned
-echo 'LOCK_FILE="/osxphotos-nas-mirror-test.lock"' >> "$fake/test.conf"
-run
-check "$rc" 64 "a lock directory owned by another user exits 64"
-check "$(outcome)" usage-error "a lock directory owned by another user ends with outcome=usage-error"
-check "$(grep -c 'not owned by' "$fake/app/osxphotos-nas-mirror.log")" 1 \
-    "a lock directory owned by another user is logged"
-check "$(called mount-volume uvx)" none "a lock directory owned by another user mounts nothing and exports nothing"
+check "$rc" 64 "a lock file that cannot be opened exits 64"
+check "$(outcome)" usage-error "a lock file that cannot be opened ends with outcome=usage-error"
+check "$(grep -c 'Cannot open the lock file' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a lock file that cannot be opened is logged"
+check "$(called mount-volume uvx)" none "a lock file that cannot be opened mounts nothing and exports nothing"
 
 setup lock-dir-missing
 echo 'LOCK_FILE="'"$fake"'/no-such-dir/run.lock"' >> "$fake/test.conf"
 run
-check "$(outcome)" usage-error "a lock directory that does not exist ends with outcome=usage-error"
+check "$(outcome)" usage-error "a lock file in a directory that does not exist ends with outcome=usage-error"
 
 setup no-keychain
 : > "$fake/no-keychain"
