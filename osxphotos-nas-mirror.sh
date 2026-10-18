@@ -85,31 +85,205 @@ trim_run_log() {
     fi
 }
 
+# The fixed set of outcomes, each as name:exit code (sysexits.h). finish
+# takes the codes from here, and the metrics textfile has a series for each.
+OUTCOMES="ok:0 skipped-preflight-check:0 skipped-locked:0 skipped-recent:0
+    usage-error:64 mount-failed:69 share-lost:69 export-failed:70
+    preflight-check-failed:70 db-copy-failed:74 interrupted:75 no-credentials:78"
+
+# The metrics textfile (METRICS_TEXTFILE in the conf), for node_exporter's
+# textfile collector. Every metric is a gauge named with this prefix.
+METRICS_PREFIX=osxphotos_nas_mirror_
+# Seconds sqlite3 gets for a query on the export database.
+EXPORT_DB_QUERY_SECONDS=60
+
+# export_db_query SQL: print what SQL selects from the export database,
+# columns separated by spaces. sqlite3 opens it read-only, so it can't change
+# it, skips ~/.sqliterc, and gets EXPORT_DB_QUERY_SECONDS.
+export_db_query() {
+    bounded "$EXPORT_DB_QUERY_SECONDS" sqlite3 -readonly -init /dev/null -batch -bail \
+        -noheader -separator ' ' "$OSXPHOTOS_EXPORT_DB" "$1" 2> /dev/null
+}
+
+# mirror_from_export_db: after an ok run, set mirror_files, mirror_bytes and
+# export_bytes from the export database. Fails, setting none, if it can't.
+#
+# What osxphotos (export_db.py and photoexporter.py at the pinned tag) keeps
+# there, and why the obvious queries are wrong:
+# - export_data has a row per file ever exported, with dest_size, its size
+#   when osxphotos last wrote it. --cleanup never deletes a row, so rows for
+#   files cleaned up, or for photos deleted from the library, stay for good:
+#   count(*) and sum(dest_size) over-count.
+# - Its timestamp is bumped whenever osxphotos rewrites the row, which it
+#   does for most files it checks, but not for one the fork skips without a
+#   download because its original isn't on the Mac (the evicted RAW+JPEG
+#   pairs and Live Photos the fork exists for), nor for a skipped AAE. So
+#   "timestamp since the export started" under-counts.
+# - history gets one row for every file the export deals with: action
+#   "new", "update: <reason>", "skip", "missing" or "export", each with an
+#   "AAE: " form, and no row for a file cleanup deletes. Its id only grows
+#   (osxphotos never deletes from it), so the rows after history_mark, its
+#   largest id before the export started, are this export's.
+# So the mirror is the files with a history row from this export that isn't
+# "missing": what the export wrote or found up to date, which is what cleanup
+# keeps on the share. Their export_data dest_size summed is mirror_bytes, and
+# summed over the new and updated ones only, export_bytes, the bytes written.
+# A missing file still on the share from an earlier run is kept by cleanup
+# but not counted. The query reads only this export's history rows, with an
+# index lookup for each, so its cost grows with the library, not with
+# history, which gains a row per file every run.
+mirror_from_export_db() {
+    local result
+    case "${history_mark:-}" in
+        '' | *[!0-9]*) return 1 ;;
+    esac
+    result=$(export_db_query "
+        WITH this_export AS (
+            SELECT filepath_id,
+                max(action IN ('new', 'export', 'AAE: new', 'AAE: export')
+                    OR action LIKE 'update: %' OR action LIKE 'AAE: update: %') AS written
+            FROM history
+            WHERE id > $history_mark AND action NOT IN ('missing', 'AAE: missing')
+            GROUP BY filepath_id
+        )
+        SELECT count(*), coalesce(sum(e.dest_size), 0),
+            coalesce(sum(CASE WHEN written THEN e.dest_size END), 0)
+        FROM this_export
+        JOIN history_path p ON p.id = this_export.filepath_id
+        LEFT JOIN export_data e ON e.filepath_normalized = p.filepath_normalized;") || return 1
+    case "$result" in
+        *[!0-9\ ]* | '') return 1 ;;
+    esac
+    read -r mirror_files mirror_bytes export_bytes <<< "$result"
+}
+
+# gauge NAME HELP VALUE [LABELS]: a gauge's HELP and TYPE lines and one
+# sample. Prints nothing if VALUE is empty.
+gauge() {
+    [ -n "$3" ] || return 0
+    printf '# HELP %s%s %s\n# TYPE %s%s gauge\n%s%s%s %s\n' \
+        "$METRICS_PREFIX" "$1" "$2" "$METRICS_PREFIX" "$1" "$METRICS_PREFIX" "$1" "${4:-}" "$3"
+}
+
+# carry NAME: metric NAME's lines from the textfile as it is, written by an
+# earlier run; nothing if it has none.
+carry() {
+    [ -f "$METRICS_TEXTFILE" ] || return 0
+    grep -E "^(# (HELP|TYPE) )?$METRICS_PREFIX$1( |\\{)" "$METRICS_TEXTFILE" 2> /dev/null
+    return 0
+}
+
+# summary_count PATTERN: the number sed PATTERN (with \(N\) for it) finds in
+# this run's export summary, from export_summary. Empty if none.
+summary_count() {
+    printf '%s\n' "${export_summary_text:-}" | sed -n "s/$1/\\1/p" | head -n 1
+}
+
+# metrics_text OUTCOME: the textfile for a run that ended OUTCOME. Each
+# metric is this run's value where this run has one; otherwise its lines are
+# carried over from the textfile an earlier run wrote:
+# - the run's time and outcome, the last-ok stamp and the export database's
+#   size: every run.
+# - the run's duration: every run but a skipped one.
+# - the export's time, duration and osxphotos' summary counts: a run whose
+#   export printed its summary.
+# - the mirror's files and bytes and the bytes written: an ok run (see
+#   mirror_from_export_db).
+metrics_text() {
+    local entry name value result files
+    gauge last_run_timestamp_seconds "When the last run ended, in seconds since the epoch." "$(date +%s)"
+    printf '# HELP %slast_run_outcome %s\n# TYPE %slast_run_outcome gauge\n' "$METRICS_PREFIX" \
+        "The last run's outcome: 1 for the outcome it ended with, 0 for every other." "$METRICS_PREFIX"
+    for entry in $OUTCOMES; do
+        name=${entry%:*}
+        value=0
+        [ "$name" != "$1" ] || value=1
+        printf '%slast_run_outcome{outcome="%s"} %s\n' "$METRICS_PREFIX" "$name" "$value"
+    done
+    if [ -e "${STAMP:-}" ]; then
+        gauge last_ok_timestamp_seconds "When the last ok run ended (the last-ok stamp's mtime), in seconds since the epoch." \
+            "$(stat -f %m "$STAMP")"
+    fi
+    case "$1" in
+        skipped-*) carry last_run_duration_seconds ;;
+        *) gauge last_run_duration_seconds "How long the last run that wasn't skipped took, in seconds." "$SECONDS" ;;
+    esac
+    if [ -n "${export_summary_text:-}" ]; then
+        gauge last_export_timestamp_seconds "When the last export that printed its summary ended, in seconds since the epoch." \
+            "$export_ended_at"
+        gauge last_export_duration_seconds "How long the last export that printed its summary took, in seconds." \
+            "$((export_ended - export_started))"
+        gauge last_export_photos "Photos the last export processed, from osxphotos' summary." \
+            "$(summary_count '.*Processed: \([0-9][0-9]*\) photo.*')"
+        files=
+        for result in exported updated skipped missing error; do
+            value=$(summary_count ".*, $result: \\([0-9][0-9]*\\).*")
+            [ -z "$value" ] || files="$files${METRICS_PREFIX}last_export_files{result=\"$result\"} $value
+"
+        done
+        if [ -n "$files" ]; then
+            printf '# HELP %slast_export_files %s\n# TYPE %slast_export_files gauge\n%s' "$METRICS_PREFIX" \
+                "Files in the last export, by what osxphotos did with them, from its summary." "$METRICS_PREFIX" "$files"
+        fi
+        gauge last_export_deleted_files "Files the last export's cleanup deleted from the share." \
+            "$(summary_count '.*Deleted: \([0-9][0-9]*\) file.*')"
+    else
+        for name in last_export_timestamp_seconds last_export_duration_seconds last_export_photos \
+            last_export_files last_export_deleted_files; do
+            carry "$name"
+        done
+    fi
+    if [ -f "${OSXPHOTOS_EXPORT_DB:-}" ]; then
+        gauge export_db_bytes "The export database's size, in bytes." "$(stat -f %z "$OSXPHOTOS_EXPORT_DB")"
+    fi
+    if [ -n "${mirror_files:-}" ]; then
+        gauge mirror_files "Files on the share as of the last ok run: those its export wrote or found up to date." "$mirror_files"
+        gauge mirror_bytes "The size of the files in mirror_files, as osxphotos last wrote them, in bytes." "$mirror_bytes"
+        gauge last_export_bytes "Bytes the last ok run's export wrote: new and updated files." "$export_bytes"
+    else
+        for name in mirror_files mirror_bytes last_export_bytes; do
+            carry "$name"
+        done
+    fi
+}
+
+# write_metrics OUTCOME: if METRICS_TEXTFILE is set, write it for a run that
+# ended OUTCOME. It is written whole to a temp file beside it, which
+# node_exporter ignores (its name doesn't end .prom), then renamed over it,
+# so node_exporter never reads half a file. A write that fails leaves the
+# textfile as it was, removes the temp file and is a warning.
+write_metrics() {
+    local tmp
+    [ -n "${METRICS_TEXTFILE:-}" ] || return 0
+    tmp="$METRICS_TEXTFILE.$$.tmp"
+    if ! { metrics_text "$1" > "$tmp" && [ ! -d "$METRICS_TEXTFILE" ] &&
+        mv -f "$tmp" "$METRICS_TEXTFILE"; } 2> /dev/null; then
+        rm -f "$tmp" 2> /dev/null
+        log "WARNING: Could not write the metrics textfile $METRICS_TEXTFILE."
+    fi
+}
+
 # finish OUTCOME: end the run. Every run ends here, with one outcome=<name>
 # line as the last line of the run log and the outcome's exit code (sysexits.h).
 # A failing run's notification names the log that explains it: an outcome
 # that stopped or followed an export names that export's log, any other the
-# run log. The run log is trimmed first, so the outcome line is never cut.
-# A run that finds the lock held doesn't trim: the run holding it may be
-# writing to the run log, and trims it when it ends.
+# run log. Then the metrics textfile is written, if the conf sets one. The
+# run log is trimmed last, so the outcome line is never cut. A run that
+# finds the lock held doesn't trim: the run holding it may be writing to the
+# run log, and trims it when it ends.
 finishing=
 finish() {
-    local code see
+    local code entry see
     finishing=$1
-    case "$1" in
-        ok | skipped-preflight-check | skipped-locked | skipped-recent) code=0 ;;
-        usage-error) code=64 ;;
-        mount-failed | share-lost) code=69 ;;
-        export-failed | preflight-check-failed) code=70 ;;
-        db-copy-failed) code=74 ;;
-        interrupted) code=75 ;;
-        no-credentials) code=78 ;;
-        *)
-            # A misspelt outcome is a bug in this script: EX_SOFTWARE.
-            log "ERROR: finish called with unknown outcome '$1'."
-            code=70
-            ;;
-    esac
+    code=
+    for entry in $OUTCOMES; do
+        [ "${entry%:*}" != "$1" ] || code=${entry#*:}
+    done
+    if [ -z "$code" ]; then
+        # A misspelt outcome is a bug in this script: EX_SOFTWARE.
+        log "ERROR: finish called with unknown outcome '$1'."
+        code=70
+    fi
     if [ "$code" -ne 0 ]; then
         see=${LOG_FILE:-}
         case "$1" in
@@ -121,6 +295,7 @@ finish() {
             notify "Mirror run failed: $1. See this run's error output (under launchd, the run log)."
         fi
     fi
+    write_metrics "$1"
     if [ -n "${LOG_FILE:-}" ] && [ "$1" != skipped-locked ]; then
         trim_run_log
     fi
@@ -162,6 +337,8 @@ done
 
 # Ensure the application support directory exists
 mkdir -p "$APP_DIR"
+# The last-ok stamp (see the recency gate), which the metrics read too.
+STAMP="$APP_DIR/last-ok"
 
 # MIRROR_INTERVAL_DAYS in the conf is the shortest gap between good runs
 # (optional, default 7; 0 turns the gate off).
@@ -272,12 +449,16 @@ export_summary() {
 
 # log_export_summary: once osxphotos has exited, however it ended, copy its
 # closing lines from the export log into the run log, or say there were
-# none. Once a run.
+# none. Once a run. It also notes, for the metrics, when the export ended
+# and the summary (export_summary_text).
 log_export_summary() {
     local summary line
     [ -n "${export_log:-}" ] && [ -z "${summary_logged:-}" ] || return 0
     summary_logged=yes
+    export_ended=$SECONDS
+    export_ended_at=$(date +%s)
     if summary=$(export_summary "$export_log"); then
+        export_summary_text=$summary
         while IFS= read -r line; do
             log "osxphotos: $line"
         done <<< "$summary"
@@ -324,7 +505,6 @@ trap 'on_signal SIGHUP' HUP
 # old the run ends skipped-recent. It comes before the preflight checks, so a
 # costly check runs at most once a gap, not every hour. No stamp: the run
 # goes ahead. Only ok writes the stamp.
-STAMP="$APP_DIR/last-ok"
 if [ "$FORCE" != true ] && [ "$MIRROR_INTERVAL_DAYS" -gt 0 ] && [ -e "$STAMP" ] &&
     [ -n "$(find "$STAMP" -mtime -"$MIRROR_INTERVAL_DAYS")" ]; then
     log "Last good run was $(date -r "$(stat -f %m "$STAMP")" '+%Y-%m-%d %H:%M:%S'), under $MIRROR_INTERVAL_DAYS days ago. Skipping this run."
@@ -438,6 +618,16 @@ share_lost() {
     log "ERROR: The share is no longer mounted at $EXPORT_DIR. $1"
     finish share-lost
 }
+# For the metrics: where this export's history rows will start (see
+# mirror_from_export_db). A new export database has none yet.
+if [ -n "${METRICS_TEXTFILE:-}" ]; then
+    if [ -e "$OSXPHOTOS_EXPORT_DB" ]; then
+        history_mark=$(export_db_query 'SELECT coalesce(max(id), 0) FROM history;') || history_mark=
+    else
+        history_mark=0
+    fi
+fi
+export_started=$SECONDS
 default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@v0.77.2-tim.3
 uvx --python 3.13 \
     --from "${OSXPHOTOS_SOURCE:-$default_osxphotos_source}" \
@@ -481,6 +671,9 @@ fi
 
 if ! touch "$STAMP"; then
     log "WARNING: Could not write $STAMP; the next run will not be held back."
+fi
+if [ -n "${METRICS_TEXTFILE:-}" ] && ! mirror_from_export_db; then
+    log "WARNING: Could not read the mirror's files and size from the export database $OSXPHOTOS_EXPORT_DB; the metrics keep the last ok run's."
 fi
 log "Mirror run finished."
 finish ok

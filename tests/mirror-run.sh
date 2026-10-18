@@ -1000,6 +1000,8 @@ for name in last_run_duration_seconds last_export_duration_seconds last_export_t
     check "$(metric_lines "$name")" "$(ok_metric_lines "$name")" \
         "a skipped run keeps the last ok run's $name"
 done
+# The ok run left the share mounted: unmount it, and it won't mount again.
+: > "$fake/mounts"
 : > "$fake/mount-fails"
 run --force
 check "$(outcome)" mount-failed "a forced run that cannot mount ends mount-failed"
