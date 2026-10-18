@@ -200,11 +200,19 @@ gauge() {
 }
 
 # carry NAME: metric NAME's lines from the textfile as it is, written by an
-# earlier run; nothing if it has none.
+# earlier run, if they are whole: a HELP line, a TYPE line, then one or more
+# samples, as this script writes them. Otherwise, or if it has none, nothing,
+# and the metric is dropped until a run has a value for it.
 carry() {
+    local lines
     [ -f "$METRICS_TEXTFILE" ] || return 0
-    grep -E "^(# (HELP|TYPE) )?$METRICS_PREFIX$1( |\\{)" "$METRICS_TEXTFILE" 2> /dev/null
-    return 0
+    lines=$(grep -E "^(# (HELP|TYPE) )?$METRICS_PREFIX$1( |\\{)" "$METRICS_TEXTFILE" 2> /dev/null) || return 0
+    printf '%s\n' "$lines" | awk -v help="# HELP $METRICS_PREFIX$1 " -v type="# TYPE $METRICS_PREFIX$1 " '
+        NR == 1 { whole = index($0, help) == 1 }
+        NR == 2 { whole = whole && index($0, type) == 1 }
+        NR > 2 { whole = whole && substr($0, 1, 1) != "#" }
+        END { exit !(whole && NR >= 3) }' || return 0
+    printf '%s\n' "$lines"
 }
 
 # summary_count PATTERN: the number sed PATTERN (with \(N\) for it) finds in
@@ -287,10 +295,19 @@ metrics_text() {
 # so node_exporter never reads half a file. A write that fails leaves the
 # textfile as it was, removes the temp file and is a warning.
 write_metrics() {
-    local tmp
-    [ -n "${METRICS_TEXTFILE:-}" ] || return 0
+    local tmp text
+    # Before the conf is checked, a relative path may still be set; it is
+    # never written (see the check after the conf is loaded).
+    case "${METRICS_TEXTFILE:-}" in
+        /*) ;;
+        *) return 0 ;;
+    esac
     tmp="$METRICS_TEXTFILE.$$.tmp"
-    if ! { metrics_text "$1" > "$tmp" && [ ! -d "$METRICS_TEXTFILE" ] &&
+    # The text is made in memory and written with one printf, whose status
+    # is checked, so a short write (a full disk, say) is never renamed over
+    # the textfile.
+    text=$(metrics_text "$1")
+    if ! { printf '%s\n' "$text" > "$tmp" && [ ! -d "$METRICS_TEXTFILE" ] &&
         mv -f "$tmp" "$METRICS_TEXTFILE"; } 2> /dev/null; then
         rm -f "$tmp" 2> /dev/null
         log "WARNING: Could not write the metrics textfile $METRICS_TEXTFILE."
@@ -373,6 +390,17 @@ done
 mkdir -p "$APP_DIR"
 # The last-ok stamp (see the recency gate), which the metrics read too.
 STAMP="$APP_DIR/last-ok"
+
+# METRICS_TEXTFILE in the conf (optional) must be an absolute path, as
+# LOCK_FILE must. A relative one is a warning, not a usage-error, since the
+# metrics never change a run's outcome; the run writes no textfile.
+case "${METRICS_TEXTFILE:-/}" in
+    /*) ;;
+    *)
+        log "WARNING: METRICS_TEXTFILE in $CONF is '$METRICS_TEXTFILE', which is not an absolute path. Writing no metrics."
+        METRICS_TEXTFILE=
+        ;;
+esac
 
 # MIRROR_INTERVAL_DAYS in the conf is the shortest gap between good runs
 # (optional, default 7; 0 turns the gate off).
