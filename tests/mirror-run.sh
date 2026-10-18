@@ -673,6 +673,8 @@ kill -KILL "$run_pid"
 wait "$run_pid" 2> /dev/null || true
 export_pid=$(cat "$fake/export.pid")
 check "$(alive "$export_pid")" alive "the export of a run killed with SIGKILL runs on"
+# The killed run mounted the share; record only what the next run does.
+rm -f "$fake/mount-volume-args.log" "$fake/osascript-args.log"
 run
 check "$rc" 0 "a run while a killed run's export runs on exits 0"
 check "$(outcome)" skipped-locked "a run while a killed run's export runs on ends with outcome=skipped-locked"

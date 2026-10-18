@@ -20,7 +20,9 @@ bounded() {
     shift
     "$@" &
     pid=$!
-    (sleep "$seconds" && kill "$pid") > /dev/null 2>&1 &
+    # The watcher doesn't get the run lock's descriptor: killing it below
+    # leaves its sleep behind, which would hold the lock until it ends.
+    (sleep "$seconds" && kill "$pid") > /dev/null 2>&1 9>&- &
     watcher=$!
     # Killing the watcher below would otherwise make bash print
     # "Terminated" on stderr, which under launchd is the log.
@@ -62,14 +64,17 @@ share_mount_point() {
 
 # finish OUTCOME: end the run. Every run ends here, with one outcome=<name>
 # line as the last line of its log and the outcome's exit code (sysexits.h).
+finishing=
 finish() {
     local code
+    finishing=$1
     case "$1" in
         ok | skipped-preflight-check | skipped-locked | skipped-recent) code=0 ;;
         usage-error) code=64 ;;
         mount-failed | share-lost) code=69 ;;
         export-failed | preflight-check-failed) code=70 ;;
         db-copy-failed) code=74 ;;
+        interrupted) code=75 ;;
         no-credentials) code=78 ;;
         *)
             # A misspelt outcome is a bug in this script: EX_SOFTWARE.
@@ -88,11 +93,10 @@ finish() {
     exit "$code"
 }
 
-# This script's own absolute path, found once. $0 may be bare or relative
-# (`bash osxphotos-nas-mirror.sh`), and lockf can't exec a bare name. pwd -P
-# and a cd in a subshell work in macOS's bash 3.2, which has no realpath.
+# This script's own directory, as an absolute path, found once. $0 may be
+# bare or relative (`bash osxphotos-nas-mirror.sh`). pwd -P and a cd in a
+# subshell work in macOS's bash 3.2, which has no realpath.
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
-SCRIPT_PATH="$SCRIPT_DIR/$(basename "$0")"
 
 # Source the configuration file. OSXPHOTOS_NAS_MIRROR_CONF overrides it (the
 # fixture tests use this); unset, it is the conf in the app directory. The
@@ -148,26 +152,97 @@ case "$#:${1:-}" in
         ;;
 esac
 
-# One run at a time. The script re-runs itself under lockf, which holds a
-# kernel lock on a file in APP_DIR: the lock goes when the run exits, however
-# it exits, so a crash can't leave a stale one. -t 0 gives up at once if
-# another run holds it.
-if [ -z "${OSXPHOTOS_NAS_MIRROR_LOCKED:-}" ]; then
-    rc=0
-    OSXPHOTOS_NAS_MIRROR_LOCKED=1 lockf -k -s -t 0 "$APP_DIR/run.lock" "$SCRIPT_PATH" "$@" || rc=$?
-    case "$rc" in
-        75)  # EX_TEMPFAIL: another run holds the lock
-            log "Another run is in progress. Exiting."
-            finish skipped-locked
-            ;;
-        73)  # EX_CANTCREAT: the lock file can't be created
-            log "ERROR: Cannot create the lock file $APP_DIR/run.lock."
-            finish usage-error
-            ;;
-    esac
-    # The locked run has already logged its outcome; pass its exit code on.
-    exit "$rc"
+# One run at a time, and one export. The run takes a kernel lock (flock) on
+# LOCK_FILE through descriptor 9, which the commands it starts inherit, so
+# the lock is held while the script or osxphotos (or uv) still has it open: a
+# run killed outright leaves the lock with its export, and later runs end
+# skipped-locked until that export ends. However its holders exit, the lock
+# goes with the last of them. macOS has no flock command, so perl takes the
+# lock on the inherited descriptor. (lockf held the lock in a process of its
+# own, which the export could outlive; see docs/adr/0006.)
+#
+# LOCK_FILE in the conf overrides where it is; unset, it is in the per-user
+# temporary directory, which macOS empties at boot, so a reboot clears any
+# lock. The directory must be the user's and writable by nobody else, or
+# another user could hold the lock or swap the file.
+if [ -z "${LOCK_FILE:-}" ]; then
+    user_tmp_dir=$(getconf DARWIN_USER_TEMP_DIR)
+    if [ -z "$user_tmp_dir" ]; then
+        log "ERROR: Cannot find the per-user temporary directory for the lock file. Set LOCK_FILE in $CONF."
+        finish usage-error
+    fi
+    LOCK_FILE="${user_tmp_dir%/}/osxphotos-nas-mirror.lock"
 fi
+lock_dir=$(dirname "$LOCK_FILE")
+if ! lock_dir_stat=$(stat -L -f '%u %Lp' "$lock_dir" 2> /dev/null); then
+    log "ERROR: The lock file's directory $lock_dir does not exist."
+    finish usage-error
+fi
+read -r lock_dir_uid lock_dir_mode <<< "$lock_dir_stat"
+if [ "$lock_dir_uid" != "$(id -u)" ]; then
+    log "ERROR: The lock file's directory $lock_dir is not owned by $(id -un). Set LOCK_FILE in $CONF to a file in a directory of your own."
+    finish usage-error
+fi
+if [ $((8#$lock_dir_mode & 8#022)) -ne 0 ]; then
+    log "ERROR: The lock file's directory $lock_dir is writable by others (mode $lock_dir_mode). Set LOCK_FILE in $CONF to a file in a directory only you can write to."
+    finish usage-error
+fi
+if ! { exec 9>> "$LOCK_FILE"; } 2> /dev/null; then
+    log "ERROR: Cannot open the lock file $LOCK_FILE."
+    finish usage-error
+fi
+lock_rc=0
+perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or exit 2;
+    flock($fh, LOCK_EX | LOCK_NB) and exit 0; exit($!{EWOULDBLOCK} ? 1 : 2)' || lock_rc=$?
+case "$lock_rc" in
+    0) ;;
+    1)
+        log "Another run, or its export, holds the lock $LOCK_FILE. Exiting."
+        finish skipped-locked
+        ;;
+    *)
+        log "ERROR: Cannot lock $LOCK_FILE (perl exited $lock_rc)."
+        finish usage-error
+        ;;
+esac
+
+# stop_export: stop osxphotos, if it was started, and wait for it. uv runs
+# osxphotos as its child: stop that, then uv. Reaping a killed job makes bash
+# print "Terminated" on stderr, which under launchd is the log, hence the
+# 2> /dev/null on wait. osxphotos is uv's child, not ours, so it is waited for
+# by polling, for up to 10 seconds; one that outlives that keeps the lock.
+stop_export() {
+    local children child i
+    [ -n "${export_pid:-}" ] || return 0
+    children=$(pgrep -P "$export_pid")
+    pkill -TERM -P "$export_pid" 2> /dev/null
+    kill "$export_pid" 2> /dev/null
+    wait "$export_pid" 2> /dev/null
+    for child in $children; do
+        i=0
+        while kill -0 "$child" 2> /dev/null && [ "$i" -lt 50 ]; do
+            sleep 0.2 9>&-
+            i=$((i + 1))
+        done
+    done
+}
+
+# A run stopped politely (SIGTERM, as launchd sends; SIGINT; SIGHUP) stops
+# its export and ends interrupted. The export wouldn't stop by itself: it is
+# a separate process, and bash starts a background command with SIGINT
+# ignored. A signal while the run is already ending is ignored, and the run
+# ends with the outcome it was ending with. SIGKILL can't be trapped; the lock
+# covers that.
+# shellcheck disable=SC2329 # run by the traps below
+on_signal() {
+    [ -z "$finishing" ] || return 0
+    log "Stopped by $1."
+    stop_export
+    finish interrupted
+}
+trap 'on_signal SIGTERM' TERM
+trap 'on_signal SIGINT' INT
+trap 'on_signal SIGHUP' HUP
 
 # RECENCY GATE (skipped by --force). The launchd agent runs hourly, so a Mac
 # that is home at any hour is caught, and the mirror runs about weekly: a run
@@ -270,7 +345,11 @@ log "Starting photo library export..."
 # go unnoticed. Every SHARE_CHECK_INTERVAL seconds the share must still be
 # mounted where the export started, or osxphotos is stopped and the run ends
 # share-lost. The export is polled every second, so one that finishes adds at
-# most a second to the run.
+# most a second to the run. The poll's sleep doesn't get the lock's
+# descriptor, so a killed run's last sleep doesn't hold the lock. Each check
+# also touches the lock file: besides emptying the temporary directory at
+# boot, macOS deletes files there that are a few days old, and the first
+# export of a large library can run for days.
 share_lost() {
     log "ERROR: The share is no longer mounted at $EXPORT_DIR. $1"
     finish share-lost
@@ -285,17 +364,13 @@ uvx --python 3.13 \
 export_pid=$!
 since_check=0
 while kill -0 "$export_pid" 2> /dev/null; do
-    sleep 1
+    sleep 1 9>&-
     since_check=$((since_check + 1))
     if [ "$since_check" -ge "${SHARE_CHECK_INTERVAL:-5}" ]; then
         since_check=0
+        touch "$LOCK_FILE" 2> /dev/null
         if [ "$(share_mount_point)" != "$EXPORT_DIR" ]; then
-            # uv runs osxphotos as its child: stop that, then uv.
-            pkill -TERM -P "$export_pid" 2> /dev/null
-            kill "$export_pid" 2> /dev/null
-            # Reaping a killed job makes bash print "Terminated" on
-            # stderr, which under launchd is the log.
-            wait "$export_pid" 2> /dev/null
+            stop_export
             share_lost "Stopped osxphotos."
         fi
     fi
