@@ -72,6 +72,9 @@ if [ -e "$FAKE_DIR/export-fails" ]; then echo "osxphotos: export failed" >&2; ex
 # (see the metrics cases); without it, a stand-in file.
 if [ -n "$db" ] && [ -e "$FAKE_DIR/export-db-this-run.sql" ]; then
     sqlite3 "$db" < "$FAKE_DIR/export-db-this-run.sql" > /dev/null
+    # macOS's sqlite3 leaves the WAL files behind; osxphotos' SQLite
+    # removes them when it closes the database.
+    rm -f "$db-wal" "$db-shm"
 elif [ -n "$db" ]; then
     echo "fake export db" > "$db"
 fi
@@ -839,11 +842,23 @@ with_metrics() {
 # with_export_db: give the current case a real export database, made with
 # sqlite3 from the schema at the pinned tag, as an earlier run left it, and
 # make the stub osxphotos write to it as a real export would.
+#
+# It is left as osxphotos leaves it, in WAL mode with no -wal or -shm file,
+# which macOS's sqlite3 can't open with -readonly, in a directory whose name
+# has a space, as "Application Support" does. Sets $export_db.
 with_export_db() {
-    mkdir -p "$fake/app"
+    export_db="$fake/app/Application Support/osxphotos_export.db"
+    mkdir -p "$(dirname "$export_db")"
+    echo 'OSXPHOTOS_EXPORT_DB="'"$export_db"'"' >> "$fake/test.conf"
     cat "$root/tests/fixtures/export-db-schema.sql" "$root/tests/fixtures/export-db-earlier-run.sql" |
-        sqlite3 "$fake/app/osxphotos_export.db" > /dev/null
+        sqlite3 "$export_db" > /dev/null
+    rm -f "$export_db-wal" "$export_db-shm"
     cp "$root/tests/fixtures/export-db-this-run.sql" "$fake/export-db-this-run.sql"
+}
+
+# wal_files: the export database's -wal and -shm files, if any.
+wal_files() {
+    ls "$export_db-wal" "$export_db-shm" 2> /dev/null || true
 }
 
 # metric NAME [LABELS]: the value of one series in $prom, such as
@@ -947,7 +962,10 @@ check "$(for r in exported updated skipped missing error; do metric last_export_
 check "$(metric last_export_photos)" 3 "last_export_photos is the summary's photo count"
 check "$(metric last_export_deleted_files)" 1 \
     "last_export_deleted_files is the cleanup line's file count"
-check "$(metric export_db_bytes)" "$(stat -f %z "$fake/app/osxphotos_export.db")" \
+check "$(wal_files)" "" "the stub osxphotos leaves the export database with no -wal or -shm file"
+check "$(grep -c 'WARNING' "$fake/app/osxphotos-nas-mirror.log")" 0 \
+    "the metrics read an export database with no -wal or -shm file, in a path with a space, with no warning"
+check "$(metric export_db_bytes)" "$(stat -f %z "$export_db")" \
     "export_db_bytes is the export database's size"
 check "$(metric mirror_files)" 6 \
     "mirror_files counts the files this export kept or wrote, not cleaned-up or missing ones"
@@ -1056,6 +1074,44 @@ check "$(grep -c 'WARNING: Could not read the mirror' "$fake/app/osxphotos-nas-m
     "an export database the metrics cannot read is logged as a warning"
 check "$(metric_lines mirror_files)" "" "an unreadable export database gives no mirror_files"
 check "$(prom_format)" valid "the textfile with no database metrics is still Prometheus text format"
+check "$(grep -c 'WARNING: Could not read the mirror.*not a database' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "the warning for an unreadable export database has sqlite3's error"
+
+# A textfile from an earlier run with a broken metric: a skipped run carries
+# the metrics that are whole and drops the others.
+setup metrics-carry-malformed
+with_metrics
+mkdir -p "$fake/app"
+touch "$fake/app/last-ok"
+cat > "$prom" <<PROM
+# HELP ${prefix}mirror_files Files.
+# TYPE ${prefix}mirror_files gauge
+# TYPE ${prefix}mirror_files gauge
+${prefix}mirror_files 6
+${prefix}mirror_bytes 7800
+# HELP ${prefix}last_export_bytes Bytes.
+# TYPE ${prefix}last_export_bytes gauge
+# HELP ${prefix}last_export_photos Photos.
+# TYPE ${prefix}last_export_photos gauge
+${prefix}last_export_photos 3
+PROM
+run
+check "$(outcome)" skipped-recent "a run with a broken earlier textfile is skipped-recent"
+check "$(prom_format)" valid "a textfile carried from a broken one is Prometheus text format"
+check "$(metric_lines mirror_files)" "" "a metric with two TYPE lines is not carried over"
+check "$(metric_lines mirror_bytes)" "" "a metric with no HELP or TYPE is not carried over"
+check "$(metric_lines last_export_bytes)" "" "a metric with no sample is not carried over"
+check "$(metric last_export_photos)" 3 "a whole metric next to broken ones is carried over"
+
+setup metrics-relative-path
+echo 'METRICS_TEXTFILE="osxphotos_nas_mirror.prom"' >> "$fake/test.conf"
+run
+check "$rc" 0 "a relative METRICS_TEXTFILE does not change the exit code"
+check "$(outcome)" ok "a relative METRICS_TEXTFILE does not change the outcome"
+check "$(grep -c 'WARNING: METRICS_TEXTFILE .* is not an absolute path' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a relative METRICS_TEXTFILE is logged as a warning"
+check "$(find "$fake" -name '*.prom*' | wc -l | tr -d ' ')" 0 \
+    "with a relative METRICS_TEXTFILE, no metrics textfile is written"
 
 # --- the run lock: a kernel lock (flock) on LOCK_FILE, held by the run and
 # by the export it starts
