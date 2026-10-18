@@ -50,6 +50,7 @@ STUB
 cat > "$work/bin/uvx" <<'STUB'
 #!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done > "$FAKE_DIR/uvx-args.log"
+echo called >> "$FAKE_DIR/uvx-calls.log"
 if [ -e "$FAKE_DIR/export-fails" ]; then echo "osxphotos: export failed" >&2; exit 1; fi
 db=
 while [ $# -gt 0 ]; do
@@ -57,6 +58,13 @@ while [ $# -gt 0 ]; do
     shift
 done
 [ -z "$db" ] || echo "fake export db" > "$db"
+# export-runs: a long export. It writes its pid to export.pid and runs until
+# the case creates export-stop (at most 30 seconds).
+if [ -e "$FAKE_DIR/export-runs" ]; then
+    echo $$ > "$FAKE_DIR/export.pid"
+    i=0
+    while [ ! -e "$FAKE_DIR/export-stop" ] && [ "$i" -lt 150 ]; do sleep 0.2; i=$((i + 1)); done
+fi
 # share-drops: the share goes partway through, and the export carries on
 # (as osxphotos did, into the folder left behind) until it is stopped.
 if [ -e "$FAKE_DIR/share-drops" ]; then
@@ -124,6 +132,7 @@ PREFLIGHT_CHECKS=("$fake/preflight-check.sh an-argument")
 APP_DIR="$fake/app"
 LOG_FILE="$fake/app/osxphotos-nas-mirror.log"
 OSXPHOTOS_EXPORT_DB="$fake/app/osxphotos_export.db"
+LOCK_FILE="$fake/run.lock"
 NOTIFY_TIMEOUT=1
 MOUNT_TIMEOUT=1
 SHARE_CHECK_INTERVAL=1
@@ -149,6 +158,45 @@ run() {
     if [ -n "${VERBOSE:-}" ]; then
         echo "--- $fake"; cat "$fake/stdout" "$fake/stderr"
     fi
+}
+
+# start_run: start the script for the current case in the
+# background, as run does. Sets $run_pid (env execs the script, so it is the
+# script's own pid).
+start_run() {
+    mkdir -p "$fake/home"
+    env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" \
+        OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" \
+        "$script" > "$fake/stdout" 2> "$fake/stderr" &
+    run_pid=$!
+}
+
+# wait_for FILE: wait up to 10 seconds for FILE to appear.
+wait_for() {
+    i=0
+    while [ ! -e "$1" ] && [ "$i" -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+}
+
+# wait_gone PID: wait up to 10 seconds for process PID to go.
+wait_gone() {
+    i=0
+    while kill -0 "$1" 2> /dev/null && [ "$i" -lt 50 ]; do sleep 0.2; i=$((i + 1)); done
+}
+
+# alive PID: "alive" if process PID is running, else "gone".
+alive() {
+    if kill -0 "$1" 2> /dev/null; then echo alive; else echo gone; fi
+}
+
+# hold_lock FILE: take the run lock on FILE as another run would, from a
+# process that holds it for 10 seconds or until killed. Sets $holder.
+hold_lock() {
+    rm -f "$fake/lock-held"
+    perl -MFcntl=:flock -e 'open(my $fh, ">>", $ARGV[0]) or exit 2;
+        flock($fh, LOCK_EX) or exit 2; open(my $m, ">", $ARGV[1]); close $m; sleep 10' \
+        "$1" "$fake/lock-held" &
+    holder=$!
+    wait_for "$fake/lock-held"
 }
 
 # called STUB...: "called" if any of the stubs ran in this case, else "none".
@@ -200,8 +248,8 @@ check "$(cat "$fake/uvx-args.log")" "$want_args" \
 check "$(cat "$fake/mount-volume-args.log")" "smb://tim@nas.test/photos" \
     "plain run mounts the share as Finder does"
 
-# Run by a relative path from another directory, the script must find itself:
-# lockf can't exec a bare relative $0, and the run would end with no outcome.
+# Run by a relative path from another directory, the script must still find
+# its own directory, where osxphotos.toml is.
 setup relative-invocation
 rc=0
 mkdir -p "$fake/home"
@@ -215,7 +263,7 @@ check "$(outcome)" ok "a run started by a relative path from another directory e
 check "$(sed -n '/^--load-config$/{n;p;}' "$fake/uvx-args.log")" "$root/osxphotos.toml" \
     "a run started by a relative path finds the repo's osxphotos.toml"
 
-# A bare $0 (no "/") is what lockf can't exec.
+# A bare $0 (no "/"): dirname gives ".".
 setup bare-invocation
 rc=0
 mkdir -p "$fake/home"
@@ -594,12 +642,12 @@ check "$(outcome)" export-failed "a notification that hangs does not change the 
 check "$(grep -c 'WARNING: Could not post a notification' "$fake/app/osxphotos-nas-mirror.log")" 1 \
     "a notification that hangs is logged as a warning"
 
-# Another run holds the lock: hold it here with the real lockf meanwhile.
+# --- the run lock: a kernel lock (flock) on LOCK_FILE, held by the run and
+# by the export it starts
+
+# Another run holds the lock: hold it here meanwhile.
 setup locked
-mkdir -p "$fake/app"
-lockf -t 0 "$fake/app/run.lock" sleep 5 &
-holder=$!
-sleep 1
+hold_lock "$fake/run.lock"
 run
 kill "$holder" 2> /dev/null || true
 wait "$holder" 2> /dev/null || true
@@ -609,10 +657,117 @@ check "$(called mount-volume uvx osascript)" none \
     "run that finds another run in progress mounts nothing, exports nothing and posts no notification"
 
 setup lock-released
-mkdir -p "$fake/app"
-lockf -t 0 "$fake/app/run.lock" true
+hold_lock "$fake/run.lock"
+kill "$holder"
+wait "$holder" 2> /dev/null || true
 run
-check "$(outcome)" ok "a lock left by a finished run does not block the next run"
+check "$(outcome)" ok "a lock file left by a finished run does not block the next run"
+
+# A run killed outright (SIGKILL, which can't be trapped) leaves its export
+# running. The export holds the lock, so the next run must not start a second.
+setup killed-mid-export
+: > "$fake/export-runs"
+start_run
+wait_for "$fake/export.pid"
+kill -KILL "$run_pid"
+wait "$run_pid" 2> /dev/null || true
+export_pid=$(cat "$fake/export.pid")
+check "$(alive "$export_pid")" alive "the export of a run killed with SIGKILL runs on"
+run
+check "$rc" 0 "a run while a killed run's export runs on exits 0"
+check "$(outcome)" skipped-locked "a run while a killed run's export runs on ends with outcome=skipped-locked"
+check "$(wc -l < "$fake/uvx-calls.log" | tr -d ' ')" 1 \
+    "a run while a killed run's export runs on starts no second export"
+check "$(called mount-volume osascript)" none \
+    "a run while a killed run's export runs on mounts nothing and posts no notification"
+# Once that export ends, the lock is free again.
+: > "$fake/export-stop"
+wait_gone "$export_pid"
+rm "$fake/export-runs"
+run
+check "$(outcome)" ok "once a killed run's export has ended, the next run gets the lock and ends ok"
+check "$(wc -l < "$fake/uvx-calls.log" | tr -d ' ')" 2 \
+    "once a killed run's export has ended, the next run exports"
+
+# A run stopped politely (SIGTERM) stops its export and ends with an outcome.
+setup terminated-mid-export
+: > "$fake/export-runs"
+start_run
+wait_for "$fake/export.pid"
+export_pid=$(cat "$fake/export.pid")
+kill -TERM "$run_pid"
+rc=0
+wait "$run_pid" 2> /dev/null || rc=$?
+log=$(cat "$fake/app/osxphotos-nas-mirror.log" 2> /dev/null || true)
+check "$(alive "$export_pid")" gone "SIGTERM to a run stops its export"
+check "$rc" 75 "a run stopped with SIGTERM exits 75"
+check "$(outcome)" interrupted "a run stopped with SIGTERM ends with outcome=interrupted"
+check "$(notified interrupted)" yes "a run stopped with SIGTERM posts a notification naming interrupted"
+check "$([ -e "$fake/Volumes/photos/.osxphotos_export.db" ] && echo copied || echo absent)" absent \
+    "a run stopped with SIGTERM does not copy the export database"
+check "$([ -e "$fake/app/last-ok" ] && echo yes || echo no)" no "a run stopped with SIGTERM writes no stamp"
+check "$(grep -c 'Terminated' "$fake/stderr")" 0 \
+    "stopping a run with SIGTERM leaves no job-control noise on stderr"
+: > "$fake/export-stop"
+
+setup hung-up-mid-export
+: > "$fake/export-runs"
+start_run
+wait_for "$fake/export.pid"
+export_pid=$(cat "$fake/export.pid")
+kill -HUP "$run_pid"
+wait "$run_pid" 2> /dev/null || true
+log=$(cat "$fake/app/osxphotos-nas-mirror.log" 2> /dev/null || true)
+check "$(alive "$export_pid")" gone "SIGHUP to a run stops its export"
+check "$(outcome)" interrupted "a run stopped with SIGHUP ends with outcome=interrupted"
+: > "$fake/export-stop"
+
+# With no LOCK_FILE, the lock is in the per-user temporary directory, which
+# macOS empties at boot. This is the user's real lock file: a real run in
+# progress makes this run end skipped-locked, which uses the same file.
+setup default-lock-file
+grep -v '^LOCK_FILE=' "$fake/test.conf" > "$fake/trimmed.conf"
+mv "$fake/trimmed.conf" "$fake/test.conf"
+default_lock=$(getconf DARWIN_USER_TEMP_DIR)osxphotos-nas-mirror.lock
+run
+check "$(outcome | grep -cx -e ok -e skipped-locked)" 1 "a run with no LOCK_FILE ends with an outcome"
+check "$([ -f "$default_lock" ] && echo present || echo absent)" present \
+    "with no LOCK_FILE, the lock file is in the per-user temporary directory"
+
+setup lock-dir-writable-by-others
+mkdir -p "$fake/shared"
+chmod 777 "$fake/shared"
+echo 'LOCK_FILE="'"$fake"'/shared/run.lock"' >> "$fake/test.conf"
+run
+check "$rc" 64 "a lock directory writable by others exits 64"
+check "$(outcome)" usage-error "a lock directory writable by others ends with outcome=usage-error"
+check "$(grep -c 'writable by others' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a lock directory writable by others is logged"
+check "$(called mount-volume uvx)" none "a lock directory writable by others mounts nothing and exports nothing"
+check "$([ -e "$fake/shared/run.lock" ] && echo created || echo absent)" absent \
+    "a lock directory writable by others gets no lock file"
+
+setup lock-dir-group-writable
+mkdir -p "$fake/group"
+chmod 770 "$fake/group"
+echo 'LOCK_FILE="'"$fake"'/group/run.lock"' >> "$fake/test.conf"
+run
+check "$(outcome)" usage-error "a group-writable lock directory ends with outcome=usage-error"
+
+# / is root's. (Like the other permission cases, this needs a non-root user.)
+setup lock-dir-not-owned
+echo 'LOCK_FILE="/osxphotos-nas-mirror-test.lock"' >> "$fake/test.conf"
+run
+check "$rc" 64 "a lock directory owned by another user exits 64"
+check "$(outcome)" usage-error "a lock directory owned by another user ends with outcome=usage-error"
+check "$(grep -c 'not owned by' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a lock directory owned by another user is logged"
+check "$(called mount-volume uvx)" none "a lock directory owned by another user mounts nothing and exports nothing"
+
+setup lock-dir-missing
+echo 'LOCK_FILE="'"$fake"'/no-such-dir/run.lock"' >> "$fake/test.conf"
+run
+check "$(outcome)" usage-error "a lock directory that does not exist ends with outcome=usage-error"
 
 setup no-keychain
 : > "$fake/no-keychain"
