@@ -69,7 +69,8 @@ SHARE_CHECK_INTERVAL=5
 NOTIFY_TIMEOUT=10
 
 # --- Application Directories ---
-# The log and the osxphotos export database live here.
+# The run log (LOG_FILE), the export logs (exports/, one per run that
+# exports) and the osxphotos export database live here.
 APP_DIR="$HOME/Library/Application Support/osxphotos-nas-mirror"
 LOG_FILE="$APP_DIR/osxphotos-nas-mirror.log"
 OSXPHOTOS_EXPORT_DB="$APP_DIR/osxphotos_export.db"

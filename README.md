@@ -99,10 +99,21 @@ The script takes at most one flag:
 
 Without a flag, the script first checks the stamp (see Automation), then runs the conf's `PREFLIGHT_CHECKS` in order. If one exits 1, as the dock check does when the dock is absent, the run ends quietly and the later ones don't run.
 
-Watch the log:
+### Logs
+
+A run writes to two places in the app directory:
+
+* The run log, `osxphotos-nas-mirror.log` (`LOG_FILE`): the script's own lines, the output of the preflight checks and the mount, and, for a run that exports, a line naming its export log and osxphotos' closing summary (`Processed: N photos, exported: N, updated: N, skipped: N, ... error: N, ...` and `Deleted: N files, N directories`), or a line saying osxphotos printed none. Each run ends with its `outcome=` line. The script trims it to its last 10,000 lines at the end of each run, except a run that ends `skipped-locked`: the run holding the lock may still be writing to it, and trims it when it ends.
+* The export logs, in `exports/`: osxphotos' own output for one run, a line or two per photo (`osxphotos.toml` sets `verbose = true`), named after the run's start time, such as `exports/2026-10-25T00-00-12.log`. Only a run that gets as far as exporting writes one. Before it does, it deletes the oldest, so the 8 newest are kept.
+
+Follow a run live in the run log, and an export in the newest export log:
 ```bash
-tail -f "$HOME/Library/Application Support/osxphotos-nas-mirror/osxphotos-nas-mirror.log"
+cd "$HOME/Library/Application Support/osxphotos-nas-mirror"
+tail -f osxphotos-nas-mirror.log
+tail -f "exports/$(ls exports | tail -n 1)"
 ```
+
+An existing install needs nothing done: its next run trims the old log, which held osxphotos' output too, down to 10,000 lines.
 
 ## Automation
 
@@ -116,32 +127,32 @@ launchctl load ~/Library/LaunchAgents/io.github.timjdfletcher.osxphotos-nas-mirr
 launchctl list | grep io.github.timjdfletcher.osxphotos-nas-mirror
 ```
 
-`make install` fills in the template with the path of this checkout and your home directory, and copies the result to `~/Library/LaunchAgents/`. It doesn't run `launchctl`; it prints the `load` command. Run `make install` again if you move the checkout, then `launchctl unload` and `launchctl load` the plist, because launchd keeps the copy it loaded. The plist sets `PATH` to include `/opt/homebrew/bin`, because launchd's default `PATH` doesn't reach Homebrew's `uv`. On an Intel Mac, where Homebrew lives in `/usr/local/bin`, edit the plist's `PATH`. stdout goes to `/dev/null` because the script already writes each line to the log; stderr goes to the log.
+`make install` fills in the template with the path of this checkout and your home directory, and copies the result to `~/Library/LaunchAgents/`. It doesn't run `launchctl`; it prints the `load` command. Run `make install` again if you move the checkout, then `launchctl unload` and `launchctl load` the plist, because launchd keeps the copy it loaded. The plist sets `PATH` to include `/opt/homebrew/bin`, because launchd's default `PATH` doesn't reach Homebrew's `uv`. On an Intel Mac, where Homebrew lives in `/usr/local/bin`, edit the plist's `PATH`. stdout goes to `/dev/null` because the script already writes each line to the run log; stderr goes to the run log.
 
-The log grows without bound, because `osxphotos.toml` sets `verbose = true`, which logs a line per photo. To keep it small, set `verbose = false` in a copy of `osxphotos.toml` and point `OSXPHOTOS_CONFIG` at the copy, or delete the log now and then between runs. (newsyslog can't rotate it: its config splits fields on spaces, and the log's path has one.)
+Neither log grows without bound (see "Logs"), so nothing needs to rotate them.
 
 ## Outcomes
 
-Every run ends with one `outcome=<name>` line as the last line of its log, and exits with that outcome's code (from `sysexits.h`):
+Every run ends with one `outcome=<name>` line as the last line of the run log, and exits with that outcome's code (from `sysexits.h`):
 
 | Outcome | Exit | Meaning |
 |---|---|---|
 | `ok` | 0 | Exported, and the export database was copied to the share. |
-| `skipped-preflight-check` | 0 | A preflight check exited 1: this run is not wanted (for the dock check, the dock is absent). The log names the check. Later checks did not run. Nothing was mounted or exported. |
+| `skipped-preflight-check` | 0 | A preflight check exited 1: this run is not wanted (for the dock check, the dock is absent). The run log names the check. Later checks did not run. Nothing was mounted or exported. |
 | `skipped-recent` | 0 | The last good run was less than `MIRROR_INTERVAL_DAYS` x 24 hours ago (see Automation). The log says when. Nothing was mounted or exported, and the preflight checks did not run. `--force` bypasses this. |
 | `skipped-locked` | 0 | Another run, or the export of one, was still in progress. A run holds a kernel lock (`flock`) on `LOCK_FILE` (by default `run.lock` in the app directory), and osxphotos inherits it, so the lock stays held while the export runs, even if the script that started it was killed. The lock ends when its last holder exits, so a lock file left behind never blocks a run. Nothing was mounted or exported. |
 | `usage-error` | 64 | An unknown argument, a `MIRROR_INTERVAL_DAYS` that is not a whole number, or a conf that is missing, unreadable, fails to load, or leaves a setting unset, or a `LOCK_FILE` that is not an absolute path or can't be opened or locked. Nothing was mounted or exported. |
 | `mount-failed` | 69 | The share was not mounted after trying to mount it. |
 | `share-lost` | 69 | The share stopped being mounted during the export or before the database copy. osxphotos was stopped and the database was not copied. |
-| `preflight-check-failed` | 70 | A preflight check exited 2 or more, or could not be run (bash's 126 and 127). The log names the check and the code. Later checks did not run. Nothing was mounted or exported. |
-| `export-failed` | 70 | `osxphotos export` exited non-zero. The export database was not copied to the share. |
+| `preflight-check-failed` | 70 | A preflight check exited 2 or more, or could not be run (bash's 126 and 127). The run log names the check and the code. Later checks did not run. Nothing was mounted or exported. |
+| `export-failed` | 70 | `osxphotos export` exited non-zero. Its export log says why. The export database was not copied to the share. |
 | `db-copy-failed` | 74 | The export succeeded, but copying the export database to the share failed. |
 | `interrupted` | 75 | The run was stopped by SIGTERM (as launchd sends when the agent is unloaded or you log out), SIGINT (Ctrl-C) or SIGHUP. osxphotos was stopped and the export database was not copied. The next run picks up where this one stopped. A stop that arrives during a preflight check or a mount attempt takes effect once that ends. |
 | `no-credentials` | 78 | The share needed mounting, but the login keychain has no SMB password for `NAS_USER` at `NAS_HOSTNAME`. Nothing was mounted or exported. Connect to the share once in Finder and tick "Remember this password in my keychain". |
 
-Every outcome with a non-zero exit code also posts a macOS notification titled "osxphotos NAS mirror" (`Mirror run failed: <outcome>. See <log file>.`, or, with no log file, a pointer to the run's error output), through `osascript`. `ok`, `skipped-preflight-check`, `skipped-recent` and `skipped-locked` post none. If the notification can't be posted, or `osascript` takes longer than `NOTIFY_TIMEOUT` seconds (conf, default 10), the run logs a warning and its outcome is unchanged.
+Every outcome with a non-zero exit code also posts a macOS notification titled "osxphotos NAS mirror", `Mirror run failed: <outcome>. See <log>.`, through `osascript`. `export-failed`, `share-lost` and `interrupted` name the export log of the export that ended the run, which explains it (an `interrupted` run stopped before its export names the run log). The others name the run log, or, with no run log, point to the run's error output. `ok`, `skipped-preflight-check`, `skipped-recent` and `skipped-locked` post none. If the notification can't be posted, or `osascript` takes longer than `NOTIFY_TIMEOUT` seconds (conf, default 10), the run logs a warning and its outcome is unchanged.
 
-When the conf is missing or unreadable, or leaves a setting unset, the run's lines, including the outcome, go to stderr instead of the log file.
+When the conf is missing or unreadable, or leaves a setting unset, the run's lines, including the outcome, go to stderr instead of the run log.
 
 ### Checking notifications
 
