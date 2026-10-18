@@ -25,6 +25,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 | `preflight-checks/download-speed.sh` | `download-speed.sh MIN_MBIT` skips the run if `networkQuality` measures the download below MIN_MBIT. Each test moves a few hundred MB (about 215 MB in the fixture), so list it after `network-path.sh` and it won't run on a hotspot. With the weekly gate it runs at most once an hour, and only while the gate is open. A run downloads missing originals from iCloud, and `networkQuality` measures the path to Apple's servers, so this covers the iCloud side. `nas-rtt.sh` covers the NAS side. |
 | `preflight-checks/nas-rtt.sh` | `nas-rtt.sh HOST MAX_MS` skips the run unless HOST answers a ping with an average round trip of at most MAX_MS. Suits a NAS on the home LAN. |
 | `examples/osxphotos-exif.toml` | An alternative config that also writes metadata with exiftool, XMP sidecars and Finder tags. The script doesn't use it; point `OSXPHOTOS_CONFIG` at a copy to use it. |
+| `examples/grafana-dashboard.json` | An example Grafana dashboard for the metrics (see "Example dashboard"). |
 | `launchd/io.github.timjdfletcher.osxphotos-nas-mirror.plist.template` | The launchd agent that runs the script, with `@REPO@` and `@HOME@` placeholders that `make install` fills in. |
 
 ## Prerequisites
@@ -162,6 +163,16 @@ Two example alerting rules:
 
 The first doesn't fire while there's no stamp at all; add `absent(osxphotos_nas_mirror_last_ok_timestamp_seconds)` if that should alert too.
 
+### Example dashboard
+
+`examples/grafana-dashboard.json` is a Grafana dashboard for these metrics. Import it (Dashboards > New > Import) and pick a Prometheus data source. It names no data source and no Mac, so it needs no editing; the Mac drop-down picks which `instance`s it shows.
+
+![The example dashboard, showing made-up data for two Macs](docs/images/grafana-dashboard.png)
+
+The top row has the time since the last good run (green under 7 days, the gap the recency gate allows, amber to 8, red after), each Mac's last outcome, and the files and bytes in the mirror. Below that are the outcome history, the age of the last good run over time, and the runs in the time range that weren't skipped. The Exports row has the run and export durations, the files each export wrote, updated and removed, the bytes it wrote a second, and the export database's size.
+
+The outcome history shows the most notable outcome in each interval on screen, a failure over ok and ok over a skip, so a run that ended minutes before the next skipped one still shows. The screenshot is of made-up data: five weeks of hourly runs from a Mac that stays at home and a laptop that sleeps at night and is away some days.
+
 ## Automation
 
 The launchd agent starts the script on the hour, every hour (`StartCalendarInterval`, `Minute` 0), so a Mac that is home at any hour is caught. A LaunchAgent runs only while you are logged in and the Mac is awake. Hourly runs missed while it slept coalesce into one run on wake.
@@ -215,8 +226,10 @@ A "LaunchAgent test" notification should appear once. `launchctl submit` restart
 ## Tests
 
 ```bash
-make test    # shellcheck, then the fixture tests and the make install test
+make test    # shellcheck, plutil and jq, then the fixture tests and the make install test
 ```
+
+`make lint` checks the example dashboard with jq (`tests/grafana-dashboard.jq`): it must parse, have no uid of its own, take its data source and Macs from the `datasource` and `instance` variables, and hard-code neither.
 
 `tests/mirror-run.sh` runs `osxphotos-nas-mirror.sh` as a process against a test conf (`OSXPHOTOS_NAS_MIRROR_CONF`) and stub `mount`, `uvx`, `osascript` and `security` on `PATH` (`osascript` stands in for both notifications and the mount), and stub preflight check scripts for each exit path and for several checks in a row, so no test touches the dock, the share or the Photos library. The example dock check is run as a process too, with a stub `ifconfig`. The metrics cases build an export database with `sqlite3` from the schema in `tests/fixtures/`, and check the textfile with `promtool check metrics` when it is on `PATH`, otherwise with a format check of their own. `tests/install.sh` runs `make install` with `HOME` set to a temporary directory and checks the plist it writes.
 
