@@ -524,7 +524,7 @@ check "$(called uvx)" none \
 check "$(notified mount-failed)" yes "share that will not mount posts a notification naming mount-failed"
 check "$(grep -c "See $fake/app/osxphotos-nas-mirror.log\." "$fake/osascript-args.log")" 1 \
     "a run that fails before the export names the run log in its notification"
-check "$(ls "$fake/app/exports" 2> /dev/null | wc -l | tr -d ' ')" 0 \
+check "$([ -e "$fake/app/exports" ] && echo present || echo absent)" absent \
     "a run that fails before the export writes no export log"
 
 setup mount-hangs

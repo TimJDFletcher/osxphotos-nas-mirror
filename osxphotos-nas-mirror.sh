@@ -62,11 +62,39 @@ share_mount_point() {
         }'
 }
 
+# The run log (LOG_FILE) keeps its last RUN_LOG_LINES lines, and exports/ in
+# the app directory keeps the export logs of the last EXPORT_LOGS_KEPT runs
+# that exported. Neither is a conf setting.
+RUN_LOG_LINES=10000
+EXPORT_LOGS_KEPT=8
+
+# trim_run_log: cut the run log to its last RUN_LOG_LINES - 1 lines, so that
+# with the outcome line, written next, it holds RUN_LOG_LINES. The trimmed
+# copy replaces the log in one rename, so a trim that fails leaves it whole,
+# and is a warning. Under launchd the script's stderr is still the old file
+# after the rename, but nothing is written to it after the outcome.
+trim_run_log() {
+    local lines
+    [ -f "$LOG_FILE" ] || return 0
+    lines=$(($(wc -l < "$LOG_FILE")))
+    [ "$lines" -ge "$RUN_LOG_LINES" ] || return 0
+    if ! { tail -n $((RUN_LOG_LINES - 1)) "$LOG_FILE" > "$LOG_FILE.trim" &&
+        mv "$LOG_FILE.trim" "$LOG_FILE"; } 2> /dev/null; then
+        rm -f "$LOG_FILE.trim" 2> /dev/null
+        log "WARNING: Could not trim the run log $LOG_FILE."
+    fi
+}
+
 # finish OUTCOME: end the run. Every run ends here, with one outcome=<name>
 # line as the last line of its log and the outcome's exit code (sysexits.h).
+# A failing run's notification names the log that explains it: an outcome
+# that stopped or followed an export names that export's log, any other the
+# run log. The run log is trimmed first, so the outcome line is never cut.
+# A run that finds the lock held doesn't trim: the run holding it may be
+# writing to the run log, and trims it when it ends.
 finishing=
 finish() {
-    local code
+    local code see
     finishing=$1
     case "$1" in
         ok | skipped-preflight-check | skipped-locked | skipped-recent) code=0 ;;
@@ -83,11 +111,18 @@ finish() {
             ;;
     esac
     if [ "$code" -ne 0 ]; then
-        if [ -n "${LOG_FILE:-}" ]; then
-            notify "Mirror run failed: $1. See $LOG_FILE."
+        see=${LOG_FILE:-}
+        case "$1" in
+            export-failed | share-lost | interrupted) see=${export_log:-$see} ;;
+        esac
+        if [ -n "$see" ]; then
+            notify "Mirror run failed: $1. See $see."
         else
             notify "Mirror run failed: $1. See this run's error output (under launchd, the agent's log)."
         fi
+    fi
+    if [ -n "${LOG_FILE:-}" ] && [ "$1" != skipped-locked ]; then
+        trim_run_log
     fi
     log "outcome=$1"
     exit "$code"
@@ -97,6 +132,10 @@ finish() {
 # bare or relative (`bash osxphotos-nas-mirror.sh`). pwd -P and a cd in a
 # subshell work in macOS's bash 3.2, which has no realpath.
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd -P)
+
+# When this run started, which names its export log: sortable, and with no
+# colons, which Finder shows as slashes.
+RUN_STARTED=$(date '+%Y-%m-%dT%H-%M-%S')
 
 # Source the configuration file. OSXPHOTOS_NAS_MIRROR_CONF overrides it (the
 # fixture tests use this); unset, it is the conf in the app directory. The
@@ -211,6 +250,54 @@ stop_export() {
             sleep 0.2 9>&-
             i=$((i + 1))
         done
+    done
+    log_export_summary
+}
+
+# export_summary FILE: print osxphotos' closing lines from the export log
+# FILE, the last of each: the summary, "Processed: N photos, exported: N,
+# updated: N, skipped: N, updated EXIF data: N, missing: N, error: N, touched
+# date: N", and, if it cleaned up, "Deleted: N files, N directories". That is
+# how osxphotos/cli/export.py (at the pinned tag) prints them through rich to
+# a file: markup stripped, one line each. They aren't anchored to the start
+# of the line, so osxphotos' --timestamp would not hide them. Fails if there
+# is no summary line.
+export_summary() {
+    local summary
+    summary=$(grep -E 'Processed: [0-9]+ photos?, exported: [0-9]+' "$1" 2> /dev/null | tail -n 1)
+    [ -n "$summary" ] || return 1
+    printf '%s\n' "$summary"
+    grep -E 'Deleted: [0-9]+ files?, [0-9]+ director' "$1" 2> /dev/null | tail -n 1
+}
+
+# log_export_summary: once osxphotos has exited, however it ended, copy its
+# closing lines from the export log into the run log, or say there were
+# none. Once a run.
+log_export_summary() {
+    local summary line
+    [ -n "${export_log:-}" ] && [ -z "${summary_logged:-}" ] || return 0
+    summary_logged=yes
+    if summary=$(export_summary "$export_log"); then
+        while IFS= read -r line; do
+            log "osxphotos: $line"
+        done <<< "$summary"
+    else
+        log "osxphotos printed no summary line in $export_log."
+    fi
+}
+
+# prune_export_logs: delete the oldest export logs, so that with this run's
+# there are EXPORT_LOGS_KEPT. Their names sort by time. Only files named as
+# export logs are touched; one that can't be deleted is a warning.
+prune_export_logs() {
+    local logs extra i
+    logs=("$EXPORT_LOG_DIR"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]-[0-9][0-9]-[0-9][0-9].log)
+    [ -e "${logs[0]}" ] || return 0
+    extra=$((${#logs[@]} - (EXPORT_LOGS_KEPT - 1)))
+    i=0
+    while [ "$i" -lt "$extra" ]; do
+        rm -f "${logs[$i]}" || log "WARNING: Could not delete the old export log ${logs[$i]}."
+        i=$((i + 1))
     done
 }
 
@@ -334,17 +421,30 @@ log "Starting photo library export..."
 # share-lost. The export is polled every second, so one that finishes adds at
 # most a second to the run. The poll's sleep doesn't get the lock's
 # descriptor, so a killed run's last sleep doesn't hold the lock.
+#
+# osxphotos' output, stdout and stderr, a line or two a photo with verbose =
+# true, goes to this run's export log in exports/, not to the run log, which
+# gets a line naming it and, once osxphotos exits, its summary. Before the
+# new export log is written, the oldest are deleted.
 share_lost() {
     log "ERROR: The share is no longer mounted at $EXPORT_DIR. $1"
     finish share-lost
 }
+EXPORT_LOG_DIR="$APP_DIR/exports"
+if ! mkdir -p "$EXPORT_LOG_DIR"; then
+    log "ERROR: Cannot create $EXPORT_LOG_DIR for the export log."
+    finish export-failed
+fi
+prune_export_logs
+export_log="$EXPORT_LOG_DIR/$RUN_STARTED.log"
+log "Export log: $export_log"
 default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@v0.77.2-tim.3
 uvx --python 3.13 \
     --from "${OSXPHOTOS_SOURCE:-$default_osxphotos_source}" \
     osxphotos export \
     --newest-first \
     --load-config "${OSXPHOTOS_CONFIG:-$SCRIPT_DIR/osxphotos.toml}" \
-    --exportdb "$OSXPHOTOS_EXPORT_DB" "$EXPORT_DIR" >> "$LOG_FILE" 2>&1 &
+    --exportdb "$OSXPHOTOS_EXPORT_DB" "$EXPORT_DIR" > "$export_log" 2>&1 &
 export_pid=$!
 since_check=0
 while kill -0 "$export_pid" 2> /dev/null; do
@@ -363,8 +463,9 @@ while kill -0 "$export_pid" 2> /dev/null; do
 done
 export_rc=0
 wait "$export_pid" 2> /dev/null || export_rc=$?
+log_export_summary
 if [ "$export_rc" -ne 0 ]; then
-    log "ERROR: The export failed. Check logs for details."
+    log "ERROR: The export failed (osxphotos exited $export_rc). See $export_log."
     finish export-failed
 fi
 log "Export complete."
