@@ -28,6 +28,10 @@ _Avoid_: Log (alone), log file
 osxphotos's own account of one run's export, one line per photo, kept for only the most recent runs that exported.
 _Avoid_: osxphotos log, verbose log
 
+**Run lock**:
+The lock that keeps runs from overlapping. A run takes it before anything is mounted, and its export holds it too, so it lasts as long as either.
+_Avoid_: lockfile, mutex
+
 **Share**:
 The SMB share on the NAS that the library is exported to.
 _Avoid_: Volume, mount, destination

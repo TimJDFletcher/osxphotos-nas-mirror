@@ -2,11 +2,11 @@
 
 Mirrors a Mac's Photos library to an SMB share on a NAS with osxphotos, unattended under launchd. It was called `icloud-photos-backup` before; old notes, issues and the local directory name may still use that.
 
-Read `GLOSSARY.md` first and use its terms (run, outcome, preflight check, share, mirror, archive, export database). Read the `docs/adr/` entries for the area you touch: they hold the reasons behind the mounting, the export database, the osxphotos pin, the mirror and the keychain check. README.md is the user's manual (outcomes table, setup); don't copy it here.
+Read `GLOSSARY.md` first and use its terms (run, outcome, preflight check, run lock, share, mirror, archive, export database). Read the `docs/adr/` entries for the area you touch: they hold the reasons behind the mounting, the export database, the osxphotos pin, the mirror, the keychain check and the run lock. README.md is the user's manual (outcomes table, setup); don't copy it here.
 
 ## Layout
 
-- `osxphotos-nas-mirror.sh`: the whole tool. Sources the conf, takes `--skip-preflight-check` or `--force` (both skip every check), re-runs itself under `lockf` on `$APP_DIR/run.lock` (a held lock ends `skipped-locked`), applies the recency gate (a `$APP_DIR/last-ok` stamp younger than `MIRROR_INTERVAL_DAYS` x 24 hours, default 7 (`find -mtime -N`: the gate opens when the stamp is exactly N x 24 hours old, not at a calendar-day boundary), ends `skipped-recent`; only an `ok` run touches it; `--force` bypasses it), runs the preflight checks, mounts the share, runs osxphotos under a watchdog, copies the export database to the share.
+- `osxphotos-nas-mirror.sh`: the whole tool. Sources the conf, takes `--skip-preflight-check` or `--force` (both skip every check), takes the run lock (a `flock`, through `perl`, on descriptor 9, which osxphotos inherits, so the lock outlives a killed script while its export runs; on `LOCK_FILE`, default `osxphotos-nas-mirror.lock` in `getconf DARWIN_USER_TEMP_DIR`, emptied at boot; a held lock ends `skipped-locked`; ADR 0006), traps SIGTERM, SIGINT and SIGHUP (stops the export, ends `interrupted`), applies the recency gate (a `$APP_DIR/last-ok` stamp younger than `MIRROR_INTERVAL_DAYS` x 24 hours, default 7 (`find -mtime -N`: the gate opens when the stamp is exactly N x 24 hours old, not at a calendar-day boundary), ends `skipped-recent`; only an `ok` run touches it; `--force` bypasses it), runs the preflight checks, mounts the share, runs osxphotos under a watchdog, copies the export database to the share.
 - `osxphotos-nas-mirror.conf.example`: every setting. The real conf is `~/Library/Application Support/osxphotos-nas-mirror/osxphotos-nas-mirror.conf` (gitignored); `OSXPHOTOS_NAS_MIRROR_CONF` overrides the path.
 - App dir (`APP_DIR`), same location: `osxphotos-nas-mirror.log`, `osxphotos_export.db` and the `last-ok` stamp.
 - `osxphotos.toml`: the osxphotos config the script loads (`OSXPHOTOS_CONFIG` overrides). `examples/osxphotos-exif.toml` is an unused alternative.
@@ -41,7 +41,7 @@ README ("Prerequisites") is the user-facing copy; keep the two in agreement. Whe
 
 ## Why the osxphotos setup is the way it is
 
-The ADRs hold the reasons for the big choices: the mount (0001), the export database on the SSD and no `--ramdb` (0002), uvx and the fork pin (0003), `cleanup = true` and the mirror (0004). What they don't hold:
+The ADRs hold the reasons for the big choices: the mount (0001), the export database on the SSD and no `--ramdb` (0002), uvx and the fork pin (0003), `cleanup = true` and the mirror (0004), the run lock that the export inherits (0006). What they don't hold:
 
 - No `--limit`: it caps one run's photo count and gives no resumption. Resumption comes from `update = true` and the export database. The script exports the whole library in one run, newest first.
 - No `overwrite` in `osxphotos.toml`: in update mode it only changes what happens when two photos map to the same file name (the second overwrites the first instead of becoming `name (1).ext`).
