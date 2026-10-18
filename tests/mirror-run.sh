@@ -734,6 +734,19 @@ check "$(grep -c "See $export_log\." "$fake/osascript-args.log")" 1 \
 check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
     "an export stopped by the watchdog says in the run log that it printed no summary"
 
+# exports/ can't be made: here a file is in its way.
+setup logs-no-export-dir
+mkdir -p "$fake/app"
+: > "$fake/app/exports"
+run
+check "$rc" 70 "a run that cannot make exports/ exits 70"
+check "$(outcome)" export-failed "a run that cannot make exports/ ends export-failed"
+check "$(grep -c "See $fake/app/osxphotos-nas-mirror.log\." "$fake/osascript-args.log")" 1 \
+    "a run that cannot make exports/ names the run log in its notification"
+check "$(called uvx)" none "a run that cannot make exports/ does not run osxphotos"
+check "$(grep -c 'Cannot create .*/exports for the export log' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a run that cannot make exports/ says so in the run log"
+
 setup logs-pruned
 old_export_logs
 run
