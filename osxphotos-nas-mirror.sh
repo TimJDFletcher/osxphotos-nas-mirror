@@ -153,40 +153,25 @@ case "$#:${1:-}" in
 esac
 
 # One run at a time, and one export. The run takes a kernel lock (flock) on
-# LOCK_FILE through descriptor 9, which the commands it starts inherit, so
-# the lock is held while the script or osxphotos (or uv) still has it open: a
-# run killed outright leaves the lock with its export, and later runs end
-# skipped-locked until that export ends. However its holders exit, the lock
-# goes with the last of them. macOS has no flock command, so perl takes the
-# lock on the inherited descriptor. (lockf held the lock in a process of its
-# own, which the export could outlive; see docs/adr/0006.)
+# LOCK_FILE through descriptor 9, which the export (uv and osxphotos)
+# inherits, so the lock is held while the script or the export still has it
+# open: a run killed outright leaves the lock with its export, and later runs
+# end skipped-locked until that export ends. However its holders exit, the
+# lock goes with the last of them, so a leftover file never blocks a run.
+# macOS has no flock command, so perl takes the lock on the inherited
+# descriptor. (lockf held the lock in a process of its own, which the export
+# could outlive; see docs/adr/0006.)
 #
-# LOCK_FILE in the conf overrides where it is; unset, it is in the per-user
-# temporary directory, which macOS empties at boot, so a reboot clears any
-# lock. The directory must be the user's and writable by nobody else, or
-# another user could hold the lock or swap the file.
-if [ -z "${LOCK_FILE:-}" ]; then
-    user_tmp_dir=$(getconf DARWIN_USER_TEMP_DIR)
-    if [ -z "$user_tmp_dir" ]; then
-        log "ERROR: Cannot find the per-user temporary directory for the lock file. Set LOCK_FILE in $CONF."
+# LOCK_FILE in the conf overrides where it is (an absolute path); unset, it
+# is run.lock in APP_DIR.
+LOCK_FILE="${LOCK_FILE:-$APP_DIR/run.lock}"
+case "$LOCK_FILE" in
+    /*) ;;
+    *)
+        log "ERROR: LOCK_FILE in $CONF is '$LOCK_FILE', which is not an absolute path."
         finish usage-error
-    fi
-    LOCK_FILE="${user_tmp_dir%/}/osxphotos-nas-mirror.lock"
-fi
-lock_dir=$(dirname "$LOCK_FILE")
-if ! lock_dir_stat=$(stat -L -f '%u %Lp' "$lock_dir" 2> /dev/null); then
-    log "ERROR: The lock file's directory $lock_dir does not exist."
-    finish usage-error
-fi
-read -r lock_dir_uid lock_dir_mode <<< "$lock_dir_stat"
-if [ "$lock_dir_uid" != "$(id -u)" ]; then
-    log "ERROR: The lock file's directory $lock_dir is not owned by $(id -un). Set LOCK_FILE in $CONF to a file in a directory of your own."
-    finish usage-error
-fi
-if [ $((8#$lock_dir_mode & 8#022)) -ne 0 ]; then
-    log "ERROR: The lock file's directory $lock_dir is writable by others (mode $lock_dir_mode). Set LOCK_FILE in $CONF to a file in a directory only you can write to."
-    finish usage-error
-fi
+        ;;
+esac
 if ! { exec 9>> "$LOCK_FILE"; } 2> /dev/null; then
     log "ERROR: Cannot open the lock file $LOCK_FILE."
     finish usage-error
@@ -210,7 +195,9 @@ esac
 # osxphotos as its child: stop that, then uv. Reaping a killed job makes bash
 # print "Terminated" on stderr, which under launchd is the log, hence the
 # 2> /dev/null on wait. osxphotos is uv's child, not ours, so it is waited for
-# by polling, for up to 10 seconds; one that outlives that keeps the lock.
+# by polling, for up to 5 seconds; one that outlives that keeps the lock.
+# (launchd gives a job 20 seconds to exit after SIGTERM, and finish may
+# still need NOTIFY_TIMEOUT seconds after this.)
 stop_export() {
     local children child i
     [ -n "${export_pid:-}" ] || return 0
@@ -220,7 +207,7 @@ stop_export() {
     wait "$export_pid" 2> /dev/null
     for child in $children; do
         i=0
-        while kill -0 "$child" 2> /dev/null && [ "$i" -lt 50 ]; do
+        while kill -0 "$child" 2> /dev/null && [ "$i" -lt 25 ]; do
             sleep 0.2 9>&-
             i=$((i + 1))
         done
@@ -346,10 +333,7 @@ log "Starting photo library export..."
 # mounted where the export started, or osxphotos is stopped and the run ends
 # share-lost. The export is polled every second, so one that finishes adds at
 # most a second to the run. The poll's sleep doesn't get the lock's
-# descriptor, so a killed run's last sleep doesn't hold the lock. Each check
-# also touches the lock file: besides emptying the temporary directory at
-# boot, macOS deletes files there that are a few days old, and the first
-# export of a large library can run for days.
+# descriptor, so a killed run's last sleep doesn't hold the lock.
 share_lost() {
     log "ERROR: The share is no longer mounted at $EXPORT_DIR. $1"
     finish share-lost
@@ -368,8 +352,10 @@ while kill -0 "$export_pid" 2> /dev/null; do
     since_check=$((since_check + 1))
     if [ "$since_check" -ge "${SHARE_CHECK_INTERVAL:-5}" ]; then
         since_check=0
-        touch "$LOCK_FILE" 2> /dev/null
         if [ "$(share_mount_point)" != "$EXPORT_DIR" ]; then
+            # A signal that arrives during this stop_export ends the run
+            # interrupted, not share-lost: the trap ends the run before
+            # share_lost is reached.
             stop_export
             share_lost "Stopped osxphotos."
         fi
