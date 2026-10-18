@@ -20,7 +20,7 @@
     {
       "type": "stat",
       "title": "Since the last good run",
-      "description": "Time since the last ok run ended (the last-ok stamp). Green under 7 days, the gap the recency gate allows; amber to 8 days; red after.",
+      "description": "Time since the last ok run ended (the last-ok stamp). Green under 7 days, the gap the recency gate allows; amber to 8 days; red after. \"no good run yet\": the Mac reports but has no last-ok stamp. \"no runs in 30 days\": the Mac hasn't reported for 30 days.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -31,7 +31,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(time() - max by (instance) (last_over_time(osxphotos_nas_mirror_last_ok_timestamp_seconds{instance=~\"$instance\"}[30d]))) / 86400",
+          "expr": "(time() - max by (instance) (last_over_time(osxphotos_nas_mirror_last_ok_timestamp_seconds{instance=~\"$instance\"}[30d]))) / 86400\nor\n0 * max by (instance) (last_over_time(osxphotos_nas_mirror_last_run_timestamp_seconds{instance=~\"$instance\"}[30d])) + 9999",
           "legendFormat": "{{instance}}",
           "refId": "A",
           "range": false,
@@ -62,8 +62,31 @@
               }
             ]
           },
-          "mappings": [],
-          "decimals": 1
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "9999": {
+                  "text": "no good run yet",
+                  "color": "red",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null+nan",
+                "result": {
+                  "text": "no runs in 30 days",
+                  "color": "red",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "decimals": 1,
+          "noValue": "no runs in 30 days"
         },
         "overrides": []
       },
@@ -108,7 +131,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (instance) (last_over_time((max by (instance) (\n    osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-recent\"} * 1\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-locked\"} * 2\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-preflight-check\"} * 3\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"ok\"} * 4\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"mount-failed\"} * 5\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"share-lost\"} * 6\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"export-failed\"} * 7\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"preflight-check-failed\"} * 8\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"db-copy-failed\"} * 9\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"interrupted\"} * 10\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"no-credentials\"} * 11\n    or osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"usage-error\"} * 12\n  ))[1d:]))",
+          "expr": "max by (instance) (\n  last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-recent\"}[30d]) * 1\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-locked\"}[30d]) * 2\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"skipped-preflight-check\"}[30d]) * 3\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"ok\"}[30d]) * 4\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"mount-failed\"}[30d]) * 5\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"share-lost\"}[30d]) * 6\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"export-failed\"}[30d]) * 7\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"preflight-check-failed\"}[30d]) * 8\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"db-copy-failed\"}[30d]) * 9\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"interrupted\"}[30d]) * 10\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"no-credentials\"}[30d]) * 11\n  or last_over_time(osxphotos_nas_mirror_last_run_outcome{instance=~\"$instance\", outcome=\"usage-error\"}[30d]) * 12\n)",
           "legendFormat": "{{instance}}",
           "refId": "A",
           "range": false,
@@ -242,7 +265,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (instance) (last_over_time(osxphotos_nas_mirror_mirror_files{instance=~\"$instance\"}[1d]))",
+          "expr": "max by (instance) (last_over_time(osxphotos_nas_mirror_mirror_files{instance=~\"$instance\"}[30d]))",
           "legendFormat": "{{instance}}",
           "refId": "A",
           "range": false,
@@ -311,7 +334,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max by (instance) (last_over_time(osxphotos_nas_mirror_mirror_bytes{instance=~\"$instance\"}[1d]))",
+          "expr": "max by (instance) (last_over_time(osxphotos_nas_mirror_mirror_bytes{instance=~\"$instance\"}[30d]))",
           "legendFormat": "{{instance}}",
           "refId": "A",
           "range": false,
