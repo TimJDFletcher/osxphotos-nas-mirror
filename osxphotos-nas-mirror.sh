@@ -97,16 +97,44 @@ METRICS_PREFIX=osxphotos_nas_mirror_
 # Seconds sqlite3 gets for a query on the export database.
 EXPORT_DB_QUERY_SECONDS=60
 
-# export_db_query SQL: print what SQL selects from the export database,
-# columns separated by spaces. sqlite3 opens it read-only, so it can't change
-# it, skips ~/.sqliterc, and gets EXPORT_DB_QUERY_SECONDS.
-export_db_query() {
-    bounded "$EXPORT_DB_QUERY_SECONDS" sqlite3 -readonly -init /dev/null -batch -bail \
-        -noheader -separator ' ' "$OSXPHOTOS_EXPORT_DB" "$1" 2> /dev/null
+# export_db_read VAR SQL: set VAR to what SQL selects from the export
+# database, columns separated by spaces. On failure VAR is left alone and
+# export_db_error says why: the first line of sqlite3's error, or that it ran
+# out of EXPORT_DB_QUERY_SECONDS. sqlite3 skips ~/.sqliterc.
+#
+# The database is opened as a URI with immutable=1, which is read-only and
+# also tells SQLite the file can't change, so it takes no locks and doesn't
+# look for the WAL files. That is needed: osxphotos keeps the database in WAL
+# mode and its SQLite removes the -wal and -shm files when it closes it, and
+# macOS's sqlite3 can't open a WAL database read-only (-readonly or mode=ro)
+# without them ("unable to open database file"). immutable is sound here
+# because both reads happen under the run lock while osxphotos isn't
+# running: just before the export starts and after it has exited. The
+# caveat: a -wal file left by an osxphotos that was killed is ignored, so
+# history_mark can be too low after such a run, and that run's history rows
+# then count as this export's; GROUP BY folds most of them into this
+# export's own rows for the same files. After osxphotos has closed the
+# database cleanly its WAL is in the main file, and the read is exact.
+export_db_read() {
+    local uri out
+    uri=$OSXPHOTOS_EXPORT_DB
+    uri=${uri//%/%25}
+    uri=${uri// /%20}
+    uri=${uri//\?/%3f}
+    uri=${uri//#/%23}
+    if out=$(bounded "$EXPORT_DB_QUERY_SECONDS" sqlite3 -init /dev/null -batch -bail \
+        -noheader -separator ' ' "file:$uri?immutable=1" "$2" 2>&1); then
+        printf -v "$1" '%s' "$out"
+        return 0
+    fi
+    export_db_error=$(printf '%s\n' "$out" | head -n 1)
+    [ -n "$export_db_error" ] || export_db_error="sqlite3 gave no answer in $EXPORT_DB_QUERY_SECONDS seconds"
+    return 1
 }
 
 # mirror_from_export_db: after an ok run, set mirror_files, mirror_bytes and
-# export_bytes from the export database. Fails, setting none, if it can't.
+# export_bytes from the export database. Fails, setting none, if it can't,
+# with export_db_error saying why.
 #
 # What osxphotos (export_db.py and photoexporter.py at the pinned tag) keeps
 # there, and why the obvious queries are wrong:
@@ -128,8 +156,11 @@ export_db_query() {
 # "missing": what the export wrote or found up to date, which is what cleanup
 # keeps on the share. Their export_data dest_size summed is mirror_bytes, and
 # summed over the new and updated ones only, export_bytes, the bytes written.
-# A missing file still on the share from an earlier run is kept by cleanup
-# but not counted. The query reads only this export's history rows, with an
+# That under-counts what cleanup keeps by the files with no history row from
+# this export: a missing file still on the share from an earlier run, a file
+# whose export failed (the summary's error count), and sidecars, which
+# osxphotos writes without a history row (sidecars.py), if a config ever
+# turns them on. The query reads only this export's history rows, with an
 # index lookup for each, so its cost grows with the library, not with
 # history, which gains a row per file every run.
 mirror_from_export_db() {
@@ -137,7 +168,7 @@ mirror_from_export_db() {
     case "${history_mark:-}" in
         '' | *[!0-9]*) return 1 ;;
     esac
-    result=$(export_db_query "
+    export_db_read result "
         WITH this_export AS (
             SELECT filepath_id,
                 max(action IN ('new', 'export', 'AAE: new', 'AAE: export')
@@ -150,9 +181,12 @@ mirror_from_export_db() {
             coalesce(sum(CASE WHEN written THEN e.dest_size END), 0)
         FROM this_export
         JOIN history_path p ON p.id = this_export.filepath_id
-        LEFT JOIN export_data e ON e.filepath_normalized = p.filepath_normalized;") || return 1
+        LEFT JOIN export_data e ON e.filepath_normalized = p.filepath_normalized;" || return 1
     case "$result" in
-        *[!0-9\ ]* | '') return 1 ;;
+        *[!0-9\ ]* | '')
+            export_db_error="sqlite3 printed '$result'"
+            return 1
+            ;;
     esac
     read -r mirror_files mirror_bytes export_bytes <<< "$result"
 }
@@ -622,7 +656,7 @@ share_lost() {
 # mirror_from_export_db). A new export database has none yet.
 if [ -n "${METRICS_TEXTFILE:-}" ]; then
     if [ -e "$OSXPHOTOS_EXPORT_DB" ]; then
-        history_mark=$(export_db_query 'SELECT coalesce(max(id), 0) FROM history;') || history_mark=
+        export_db_read history_mark 'SELECT coalesce(max(id), 0) FROM history;' || history_mark=
     else
         history_mark=0
     fi
@@ -673,7 +707,7 @@ if ! touch "$STAMP"; then
     log "WARNING: Could not write $STAMP; the next run will not be held back."
 fi
 if [ -n "${METRICS_TEXTFILE:-}" ] && ! mirror_from_export_db; then
-    log "WARNING: Could not read the mirror's files and size from the export database $OSXPHOTOS_EXPORT_DB; the metrics keep the last ok run's."
+    log "WARNING: Could not read the mirror's files and size from the export database $OSXPHOTOS_EXPORT_DB (${export_db_error:-no history mark from before the export}); the metrics keep the last ok run's."
 fi
 log "Mirror run finished."
 finish ok
