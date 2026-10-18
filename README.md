@@ -67,6 +67,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
     * `OSXPHOTOS_SOURCE` (optional): what `uvx --from` installs osxphotos from, such as `osxphotos==0.77.2` or `git+https://...@<tag>`. Unset, the script's pinned default is used. Python stays 3.13.
     * `OSXPHOTOS_CONFIG` (optional): the osxphotos TOML to load. Unset, the repo's `osxphotos.toml`.
     * `LOCK_FILE` (optional): the run lock's file (see "Outcomes", `skipped-locked`). Unset, `run.lock` in the app directory. It must be an absolute path, or the run ends `usage-error`.
+    * `METRICS_TEXTFILE` (optional): a Prometheus textfile for node_exporter, written at the end of every run (see "Metrics"). Unset, no metrics.
 
     On a laptop, set a preflight check. `nas-rtt.sh` needs no MAC address and no swift; use the dock check if you dock. Without one, every hourly attempt away from home, once the weekly gate opens, ends `mount-failed` with a notification.
 
@@ -114,6 +115,52 @@ tail -f "exports/$(ls exports | tail -n 1)"
 ```
 
 An existing install needs nothing done: its next run trims the old run log, which held osxphotos' output too, down to 10,000 lines.
+
+### Metrics
+
+With `METRICS_TEXTFILE` set in the conf, every run ends by writing that file in Prometheus text format, for [node_exporter](https://github.com/prometheus/node_exporter)'s textfile collector. Point the collector at the file's directory and give the file a name ending `.prom`, for example:
+
+```bash
+node_exporter --collector.textfile.directory=/opt/homebrew/var/node_exporter/textfile
+```
+```bash
+METRICS_TEXTFILE="/opt/homebrew/var/node_exporter/textfile/osxphotos_nas_mirror.prom"
+```
+
+(Homebrew's `node_exporter` service takes its flags from `$(brew --prefix)/etc/node_exporter.args`.) The script writes the whole file to a temp file beside it, named `….prom.<pid>.tmp`, which the collector ignores, then renames it over the old one, so node_exporter never reads half a file. If it can't, the run logs a warning before its outcome line, removes the temp file, and its outcome and exit code don't change.
+
+Every metric is a gauge with `# HELP` and `# TYPE` lines, named with the prefix `osxphotos_nas_mirror_`:
+
+| Metric | Meaning | Updated by |
+|---|---|---|
+| `last_run_timestamp_seconds` | When the last run ended (Unix time). | every run |
+| `last_run_outcome{outcome="…"}` | One series for each outcome in the table under "Outcomes": 1 for the outcome the last run ended with, 0 for the others. | every run |
+| `last_ok_timestamp_seconds` | The `last-ok` stamp's mtime: when the last `ok` run ended. Left out while there is no stamp. | every run |
+| `export_db_bytes` | The export database's size. | every run |
+| `last_run_duration_seconds` | How long the run took. | every run that isn't skipped (`skipped-*`) |
+| `last_export_timestamp_seconds`, `last_export_duration_seconds` | When the export ended, and how long it took. | every run whose export printed osxphotos' summary |
+| `last_export_photos` | Photos processed, from osxphotos' summary line. | the same |
+| `last_export_files{result="…"}` | Files `exported` (new), `updated`, `skipped` (up to date), `missing` and `error`, from the summary line. | the same |
+| `last_export_deleted_files` | Files cleanup deleted from the share, from the `Deleted: N files` line. | the same |
+| `mirror_files`, `mirror_bytes` | The files on the share and their size (see below). | every `ok` run |
+| `last_export_bytes` | Bytes the export wrote: the size of its new and updated files. | every `ok` run |
+
+A run that doesn't update a metric carries its last value over from the file as it was, so a `skipped-recent` run changes only the run timestamp, the outcome series, the stamp and the database size, and the export's counts stay those of the last export that printed its summary.
+
+`mirror_files` and `mirror_bytes` come from the export database, read with the system `sqlite3`, read-only, after the export, not from the share (no `du` or `find` over SMB). They count the files this run's export wrote or found up to date, which are the files cleanup leaves on the share, and add up their sizes as osxphotos recorded them when it last wrote each one. They leave out files cleanup deleted and photos gone from the library, which stay in the database for good, and also a file osxphotos reported missing this run that an earlier run left on the share. Files you put on the share yourself aren't counted either. `osxphotos-nas-mirror.sh` (`mirror_from_export_db`) has the details.
+
+Two example alerting rules:
+
+```yaml
+- alert: PhotosMirrorStale
+  # No ok run for 8 days (the gate allows one every 7).
+  expr: time() - osxphotos_nas_mirror_last_ok_timestamp_seconds > 8 * 86400
+- alert: PhotosMirrorFailed
+  # The last run ended with an outcome that exits non-zero.
+  expr: max(osxphotos_nas_mirror_last_run_outcome{outcome!~"ok|skipped-.*"}) == 1
+```
+
+The first doesn't fire while there's no stamp at all; add `absent(osxphotos_nas_mirror_last_ok_timestamp_seconds)` if that should alert too.
 
 ## Automation
 
@@ -171,7 +218,7 @@ A "LaunchAgent test" notification should appear once. `launchctl submit` restart
 make test    # shellcheck, then the fixture tests and the make install test
 ```
 
-`tests/mirror-run.sh` runs `osxphotos-nas-mirror.sh` as a process against a test conf (`OSXPHOTOS_NAS_MIRROR_CONF`) and stub `mount`, `uvx`, `osascript` and `security` on `PATH` (`osascript` stands in for both notifications and the mount), and stub preflight check scripts for each exit path and for several checks in a row, so no test touches the dock, the share or the Photos library. The example dock check is run as a process too, with a stub `ifconfig`. `tests/install.sh` runs `make install` with `HOME` set to a temporary directory and checks the plist it writes.
+`tests/mirror-run.sh` runs `osxphotos-nas-mirror.sh` as a process against a test conf (`OSXPHOTOS_NAS_MIRROR_CONF`) and stub `mount`, `uvx`, `osascript` and `security` on `PATH` (`osascript` stands in for both notifications and the mount), and stub preflight check scripts for each exit path and for several checks in a row, so no test touches the dock, the share or the Photos library. The example dock check is run as a process too, with a stub `ifconfig`. The metrics cases build an export database with `sqlite3` from the schema in `tests/fixtures/`, and check the textfile with `promtool check metrics` when it is on `PATH`, otherwise with a format check of their own. `tests/install.sh` runs `make install` with `HOME` set to a temporary directory and checks the plist it writes.
 
 ## Behaviour to know about
 

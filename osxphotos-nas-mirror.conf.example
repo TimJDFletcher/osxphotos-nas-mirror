@@ -63,6 +63,14 @@ SHARE_CHECK_INTERVAL=5
 # blocks a run. An absolute path. Unset: run.lock in APP_DIR.
 #LOCK_FILE=""
 
+# --- Metrics (optional) ---
+# A Prometheus textfile the script writes at the end of every run, for
+# node_exporter's textfile collector: an absolute path ending .prom in the
+# directory node_exporter's --collector.textfile.directory names. A file that
+# can't be written is a warning and never changes the run's outcome. Unset:
+# no metrics.
+#METRICS_TEXTFILE="/opt/homebrew/var/node_exporter/textfile/osxphotos_nas_mirror.prom"
+
 # --- Notifications ---
 # Seconds to wait for osascript to post a failure notification (optional,
 # default 10).
