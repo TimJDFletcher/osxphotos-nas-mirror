@@ -68,7 +68,13 @@ done
 echo "Exported new file $dest/2026/10/18/IMG_0001.HEIC"
 echo "Exported updated file $dest/2026/10/18/IMG_0002.HEIC"
 if [ -e "$FAKE_DIR/export-fails" ]; then echo "osxphotos: export failed" >&2; exit 1; fi
-[ -z "$db" ] || echo "fake export db" > "$db"
+# export-db-this-run.sql: osxphotos' own writes to a real export database
+# (see the metrics cases); without it, a stand-in file.
+if [ -n "$db" ] && [ -e "$FAKE_DIR/export-db-this-run.sql" ]; then
+    sqlite3 "$db" < "$FAKE_DIR/export-db-this-run.sql" > /dev/null
+elif [ -n "$db" ]; then
+    echo "fake export db" > "$db"
+fi
 # export-runs: a long export. It writes its pid to export.pid and runs until
 # the case creates export-stop (at most 30 seconds).
 if [ -e "$FAKE_DIR/export-runs" ]; then
@@ -815,6 +821,239 @@ check "$(grep -c 'WARNING: Could not trim the run log' "$fake/app/osxphotos-nas-
     "a run log that cannot be trimmed is logged as a warning"
 check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
     "a run log that cannot be trimmed is left whole"
+
+# --- the metrics textfile (METRICS_TEXTFILE), for node_exporter
+
+prefix=osxphotos_nas_mirror_
+# Every outcome in the fixed set, as finish and the README's table have them.
+all_outcomes="ok skipped-preflight-check skipped-recent skipped-locked usage-error mount-failed share-lost preflight-check-failed export-failed db-copy-failed interrupted no-credentials"
+
+# with_metrics: set METRICS_TEXTFILE for the current case, in a directory of
+# its own, as node_exporter's textfile directory would be. Sets $prom.
+with_metrics() {
+    mkdir -p "$fake/textfile"
+    prom=$fake/textfile/osxphotos_nas_mirror.prom
+    echo 'METRICS_TEXTFILE="'"$prom"'"' >> "$fake/test.conf"
+}
+
+# with_export_db: give the current case a real export database, made with
+# sqlite3 from the schema at the pinned tag, as an earlier run left it, and
+# make the stub osxphotos write to it as a real export would.
+with_export_db() {
+    mkdir -p "$fake/app"
+    cat "$root/tests/fixtures/export-db-schema.sql" "$root/tests/fixtures/export-db-earlier-run.sql" |
+        sqlite3 "$fake/app/osxphotos_export.db" > /dev/null
+    cp "$root/tests/fixtures/export-db-this-run.sql" "$fake/export-db-this-run.sql"
+}
+
+# metric NAME [LABELS]: the value of one series in $prom, such as
+# metric last_run_outcome '{outcome="ok"}'. Empty if it isn't there.
+metric() {
+    awk -v want="$prefix$1${2:-}" '$1 == want { print $2 }' "$prom" 2> /dev/null || true
+}
+
+# metric_lines NAME: the HELP, TYPE and sample lines of one metric in FILE
+# ($prom by default).
+metric_lines() {
+    grep -E "^(# (HELP|TYPE) )?$prefix$1( |\\{)" "${2:-$prom}" 2> /dev/null || true
+}
+
+# prom_format: "valid" if $prom is Prometheus text exposition format, else
+# what is wrong. promtool when it is on PATH; otherwise a check of the lines
+# this tool writes: every metric has one HELP and one TYPE line before its
+# samples, names and labels are well formed, every value is a number, and
+# the file ends with a newline.
+prom_format() {
+    if [ ! -f "$prom" ]; then echo "no textfile"; return; fi
+    if command -v promtool > /dev/null 2>&1; then
+        if out=$(promtool check metrics < "$prom" 2>&1); then echo valid; else echo "$out"; fi
+        return
+    fi
+    if [ -n "$(tail -c 1 "$prom")" ]; then echo "no final newline"; return; fi
+    awk '
+        function bad(why) { print "line " NR ": " why ": " $0; failed = 1; exit }
+        /^# HELP / {
+            if ($3 !~ /^[a-zA-Z_:][a-zA-Z0-9_:]*$/ || NF < 4) bad("bad HELP")
+            if (help[$3]++) bad("second HELP")
+            next
+        }
+        /^# TYPE / {
+            if (NF != 4 || $4 !~ /^(counter|gauge|histogram|summary|untyped)$/) bad("bad TYPE")
+            if (!help[$3]) bad("TYPE before HELP")
+            if (type[$3]++) bad("second TYPE")
+            next
+        }
+        /^#/ || /^$/ { bad("stray line") }
+        {
+            if (NF != 2) bad("not NAME VALUE")
+            name = $1
+            sub(/\{.*$/, "", name)
+            if (name !~ /^[a-zA-Z_:][a-zA-Z0-9_:]*$/) bad("bad name")
+            labels = substr($1, length(name) + 1)
+            if (labels != "" && labels !~ /^\{[a-zA-Z_][a-zA-Z0-9_]*="[^"]*"(,[a-zA-Z_][a-zA-Z0-9_]*="[^"]*")*\}$/) bad("bad labels")
+            if ($2 !~ /^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$/) bad("bad value")
+            if (!type[name]) bad("sample before its TYPE")
+            if (seen[$1]++) bad("second sample")
+        }
+        END { if (!failed) print "valid" }
+    ' "$prom"
+}
+
+# outcome_series: each outcome's series value, "name=value" a line, in
+# all_outcomes order.
+outcome_series() {
+    for o in $all_outcomes; do
+        echo "$o=$(metric last_run_outcome "{outcome=\"$o\"}")"
+    done
+}
+
+# want_outcome_series OUTCOME: outcome_series as it should be when the run
+# ended OUTCOME.
+want_outcome_series() {
+    for o in $all_outcomes; do
+        if [ "$o" = "$1" ]; then echo "$o=1"; else echo "$o=0"; fi
+    done
+}
+
+# textfile_dir: what is in the case's textfile directory.
+textfile_dir() {
+    ls -A "$fake/textfile" 2> /dev/null || true
+}
+
+setup metrics-ok
+with_metrics
+with_export_db
+before=$(date +%s)
+run
+after=$(date +%s)
+check "$rc" 0 "a run with METRICS_TEXTFILE set exits 0"
+check "$(outcome)" ok "a run with METRICS_TEXTFILE set ends ok"
+check "$(prom_format)" valid "the metrics textfile is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series ok)" \
+    "an ok run sets the ok outcome series to 1 and every other outcome's to 0"
+check "$(grep -c "^${prefix}last_run_outcome{" "$prom")" 12 \
+    "the textfile has one outcome series for each of the 12 outcomes"
+ended=$(metric last_run_timestamp_seconds)
+check "$([ "$ended" -ge "$before" ] && [ "$ended" -le "$after" ] && echo during || echo "$ended")" during \
+    "last_run_timestamp_seconds is when the run ended"
+check "$(metric last_ok_timestamp_seconds)" "$(stat -f %m "$fake/app/last-ok")" \
+    "last_ok_timestamp_seconds is the last-ok stamp's mtime"
+check "$(metric last_run_duration_seconds | grep -c -E '^[0-9]+$')" 1 \
+    "last_run_duration_seconds is a whole number of seconds"
+check "$(metric last_export_duration_seconds | grep -c -E '^[0-9]+$')" 1 \
+    "last_export_duration_seconds is a whole number of seconds"
+check "$(for r in exported updated skipped missing error; do metric last_export_files "{result=\"$r\"}"; done | tr '\n' ' ')" \
+    "1 1 1 0 0 " "the last export's file counts come from osxphotos' summary line"
+check "$(metric last_export_photos)" 3 "last_export_photos is the summary's photo count"
+check "$(metric last_export_deleted_files)" 1 \
+    "last_export_deleted_files is the cleanup line's file count"
+check "$(metric export_db_bytes)" "$(stat -f %z "$fake/app/osxphotos_export.db")" \
+    "export_db_bytes is the export database's size"
+check "$(metric mirror_files)" 6 \
+    "mirror_files counts the files this export kept or wrote, not cleaned-up or missing ones"
+check "$(metric mirror_bytes)" 7800 "mirror_bytes is those files' sizes"
+check "$(metric last_export_bytes)" 5600 \
+    "last_export_bytes is the size of the files this export wrote, new and updated"
+check "$(textfile_dir)" osxphotos_nas_mirror.prom \
+    "writing the metrics textfile leaves no temp file behind"
+
+# A failing run: the outcome series, and the run's own timestamp.
+setup metrics-mount-failed
+with_metrics
+: > "$fake/mount-fails"
+run
+check "$rc" 69 "metrics do not change a failing run's exit code"
+check "$(prom_format)" valid "a failing run's metrics textfile is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series mount-failed)" \
+    "a mount-failed run sets mount-failed to 1 and every other outcome to 0"
+check "$(metric_lines last_ok_timestamp_seconds)" "" \
+    "with no last-ok stamp the textfile has no last_ok_timestamp_seconds"
+check "$(metric_lines mirror_files)" "" \
+    "a run with no export and no earlier textfile has no mirror_files"
+
+# ok_metric_lines NAME: metric_lines NAME from the ok run's textfile, which
+# must have it.
+ok_metric_lines() {
+    metric_lines "$1" "$fake/after-ok.prom" | grep . || echo "(no $1 after the ok run)"
+}
+
+# An ok run, then a skipped one, then a failed one. The skipped run keeps
+# every value but the run timestamp and the outcome series; the failed one
+# also updates the run's duration.
+setup metrics-carried
+with_metrics
+with_export_db
+run
+cp "$prom" "$fake/after-ok.prom" 2> /dev/null || : > "$fake/after-ok.prom"
+sleep 1
+run
+check "$(outcome)" skipped-recent "a run after an ok one is skipped-recent"
+check "$(prom_format)" valid "a skipped run's metrics textfile is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series skipped-recent)" \
+    "a skipped-recent run sets its own outcome series"
+ok_ended=$(awk -v n="${prefix}last_run_timestamp_seconds" '$1 == n { print $2 }' "$fake/after-ok.prom" 2> /dev/null || true)
+check "$([ "$(metric last_run_timestamp_seconds)" -gt "$ok_ended" ] && echo new || echo old)" new \
+    "a skipped run updates last_run_timestamp_seconds"
+for name in last_run_duration_seconds last_export_duration_seconds last_export_timestamp_seconds \
+    last_export_files last_export_photos last_export_deleted_files mirror_files mirror_bytes last_export_bytes \
+    last_ok_timestamp_seconds; do
+    check "$(metric_lines "$name")" "$(ok_metric_lines "$name")" \
+        "a skipped run keeps the last ok run's $name"
+done
+: > "$fake/mount-fails"
+run --force
+check "$(outcome)" mount-failed "a forced run that cannot mount ends mount-failed"
+check "$(prom_format)" valid "a failed run's textfile, after an ok run's, is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series mount-failed)" \
+    "a failed run after an ok one sets its own outcome series"
+for name in last_export_duration_seconds last_export_files mirror_files mirror_bytes last_export_bytes; do
+    check "$(metric_lines "$name")" "$(ok_metric_lines "$name")" \
+        "a failed run keeps the last ok run's $name"
+done
+check "$(textfile_dir)" osxphotos_nas_mirror.prom "carrying metrics over leaves no temp file behind"
+
+setup metrics-unset
+run
+check "$(outcome)" ok "a run with no METRICS_TEXTFILE ends ok"
+check "$(find "$fake" -name '*.prom*' | wc -l | tr -d ' ')" 0 \
+    "with no METRICS_TEXTFILE, no metrics textfile is written"
+
+# The textfile's directory is read-only: the temp file can't be written.
+setup metrics-unwritable
+with_metrics
+chmod a-w "$fake/textfile"
+run
+chmod u+w "$fake/textfile"
+check "$rc" 0 "a metrics textfile that cannot be written does not change the exit code"
+check "$(outcome)" ok "a metrics textfile that cannot be written does not change the outcome"
+check "$(grep -c "WARNING: Could not write the metrics textfile $prom" "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a metrics textfile that cannot be written is logged as a warning"
+check "$(textfile_dir)" "" "a metrics textfile that cannot be written leaves nothing behind"
+
+# The textfile's path is a directory: the temp file is written, but can't
+# replace it.
+setup metrics-path-is-a-directory
+with_metrics
+mkdir "$prom"
+: > "$fake/mount-fails"
+run
+check "$rc" 69 "a metrics path that is a directory does not change the exit code"
+check "$(outcome)" mount-failed "a metrics path that is a directory does not change the outcome"
+check "$(grep -c 'WARNING: Could not write the metrics textfile' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a metrics path that is a directory is logged as a warning"
+check "$(textfile_dir)" osxphotos_nas_mirror.prom "a textfile that cannot replace its path leaves no temp file behind"
+check "$(ls -A "$prom")" "" "a textfile that cannot replace its path is not moved into it"
+
+# An export database sqlite3 can't read: the run ends as it would have, with
+# no database metrics.
+setup metrics-db-unreadable
+with_metrics
+run
+check "$(outcome)" ok "an export database the metrics cannot read does not change the outcome"
+check "$(grep -c 'WARNING: Could not read the mirror' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "an export database the metrics cannot read is logged as a warning"
+check "$(metric_lines mirror_files)" "" "an unreadable export database gives no mirror_files"
+check "$(prom_format)" valid "the textfile with no database metrics is still Prometheus text format"
 
 # --- the run lock: a kernel lock (flock) on LOCK_FILE, held by the run and
 # by the export it starts
