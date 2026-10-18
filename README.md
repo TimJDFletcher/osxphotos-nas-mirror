@@ -229,7 +229,7 @@ A "LaunchAgent test" notification should appear once. `launchctl submit` restart
 make test    # shellcheck, plutil and jq, then the fixture tests and the make install test
 ```
 
-`make lint` checks the example dashboard with jq (`tests/grafana-dashboard.jq`): it must parse, have no uid of its own, take its data source and Macs from the `datasource` and `instance` variables, and hard-code neither.
+`make lint` checks the example dashboard with jq (`tests/grafana-dashboard.sh`): it must parse, have no uid of its own, take its data source and Macs from the `datasource` and `instance` variables, and hard-code neither. It must also query only metrics the script writes, and its outcome codes must cover exactly the outcomes in `OUTCOMES`; the check reads both from `osxphotos-nas-mirror.sh`.
 
 `tests/mirror-run.sh` runs `osxphotos-nas-mirror.sh` as a process against a test conf (`OSXPHOTOS_NAS_MIRROR_CONF`) and stub `mount`, `uvx`, `osascript` and `security` on `PATH` (`osascript` stands in for both notifications and the mount), and stub preflight check scripts for each exit path and for several checks in a row, so no test touches the dock, the share or the Photos library. The example dock check is run as a process too, with a stub `ifconfig`. The metrics cases build an export database with `sqlite3` from the schema in `tests/fixtures/`, and check the textfile with `promtool check metrics` when it is on `PATH`, otherwise with a format check of their own. `tests/install.sh` runs `make install` with `HOME` set to a temporary directory and checks the plist it writes.
 
