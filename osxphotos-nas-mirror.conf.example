@@ -56,6 +56,13 @@ SHARE_CHECK_INTERVAL=5
 # The osxphotos TOML config to load. Unset: osxphotos.toml in the repo.
 #OSXPHOTOS_CONFIG=""
 
+# --- Run lock (optional) ---
+# The file the run lock is taken on. One run at a time: a run that finds the
+# lock held, by another run or by the export of one, ends skipped-locked.
+# The lock ends with the run and its export, so a file left behind never
+# blocks a run. An absolute path. Unset: run.lock in APP_DIR.
+#LOCK_FILE=""
+
 # --- Notifications ---
 # Seconds to wait for osascript to post a failure notification (optional,
 # default 10).
