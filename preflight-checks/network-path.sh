@@ -85,7 +85,7 @@ done
 rc=0
 wait "$pid" || rc=$?
 
-# Whatever swift said on stderr is useful in the log.
+# Whatever swift said on stderr is useful in the run log.
 while IFS= read -r line; do
     note "swift: $line"
 done < "$tmp/err"

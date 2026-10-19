@@ -28,6 +28,10 @@ _Avoid_: Log (alone), log file
 osxphotos's own account of one run's export, one line per photo, kept for only the most recent runs that exported.
 _Avoid_: osxphotos log, verbose log
 
+**Metrics textfile**:
+The file in Prometheus text format, for node_exporter, that every run rewrites as it ends: its outcome and times, osxphotos' counts and the mirror's size. Optional.
+_Avoid_: Metrics file, prom file, exporter
+
 **Run lock**:
 The lock that keeps runs from overlapping. A run takes it before anything is mounted, and its export holds it too, so it lasts as long as either.
 _Avoid_: lockfile, mutex

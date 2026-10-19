@@ -9,7 +9,7 @@
 # a stub ifconfig. Stub behaviour is switched per case by marker files in the
 # case's directory ($FAKE_DIR).
 #
-# Run by `make test`. With VERBOSE=1 every case prints the run's log.
+# Run by `make test`. With VERBOSE=1 every case prints the run's output (its run log lines).
 #
 # POSIX sh only.
 set -eu
@@ -47,17 +47,37 @@ echo "tests: the script ran osxphotos directly, not through uvx" >&2
 exit 99
 STUB
 # uvx: the script runs osxphotos through uv, so this stub stands in for both.
+# It prints what osxphotos export prints with verbose = true to a file (not a
+# terminal): a line or two per photo, then the closing summary and cleanup
+# lines, as osxphotos/cli/export.py at the pinned tag writes them through
+# rich with the markup stripped. A failed or stopped export prints no summary.
 cat > "$work/bin/uvx" <<'STUB'
 #!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done > "$FAKE_DIR/uvx-args.log"
 echo called >> "$FAKE_DIR/uvx-calls.log"
-if [ -e "$FAKE_DIR/export-fails" ]; then echo "osxphotos: export failed" >&2; exit 1; fi
 db=
+for a in "$@"; do dest=$a; done
 while [ $# -gt 0 ]; do
     if [ "$1" = --exportdb ]; then db=$2; fi
     shift
 done
-[ -z "$db" ] || echo "fake export db" > "$db"
+echo "Exporting 3 photos to $dest..."
+for n in 1 2 3; do
+    echo "Exporting IMG_000$n.HEIC (IMG_000$n.HEIC) ($n/3)"
+done
+echo "Exported new file $dest/2026/10/18/IMG_0001.HEIC"
+echo "Exported updated file $dest/2026/10/18/IMG_0002.HEIC"
+if [ -e "$FAKE_DIR/export-fails" ]; then echo "osxphotos: export failed" >&2; exit 1; fi
+# export-db-this-run.sql: osxphotos' own writes to a real export database
+# (see the metrics cases); without it, a stand-in file.
+if [ -n "$db" ] && [ -e "$FAKE_DIR/export-db-this-run.sql" ]; then
+    sqlite3 "$db" < "$FAKE_DIR/export-db-this-run.sql" > /dev/null
+    # macOS's sqlite3 leaves the WAL files behind; osxphotos' SQLite
+    # removes them when it closes the database.
+    rm -f "$db-wal" "$db-shm"
+elif [ -n "$db" ]; then
+    echo "fake export db" > "$db"
+fi
 # export-runs: a long export. It writes its pid to export.pid and runs until
 # the case creates export-stop (at most 30 seconds).
 if [ -e "$FAKE_DIR/export-runs" ]; then
@@ -75,7 +95,13 @@ if [ -e "$FAKE_DIR/share-drops" ]; then
 fi
 # share-drops-at-end: the share goes just as the export finishes.
 [ ! -e "$FAKE_DIR/share-drops-at-end" ] || : > "$FAKE_DIR/mounts"
-echo "Exported: 3 photos"
+# no-summary: an export that ends without its summary.
+[ ! -e "$FAKE_DIR/no-summary" ] || exit 0
+echo "Processed: 3 photos, exported: 1, updated: 1, skipped: 1, updated EXIF data: 0, missing: 0, error: 0, touched date: 2"
+echo "Elapsed time: 0:00:01"
+echo "Cleaning up $dest"
+echo "Deleting $dest/2026/10/17/IMG_0000.HEIC"
+echo "Deleted: 1 file, 0 directories"
 STUB
 # osascript: a script that mounts a volume stands in for Finder's mount,
 # under the case's own Volumes directory; anything else is a notification.
@@ -345,7 +371,7 @@ run
 check "$(outcome)" skipped-preflight-check "a first check that exits 1 ends the run skipped-preflight-check"
 check "$(called second-check)" none "a first check that exits 1 stops the second from running"
 check "$(grep -c 'preflight-check.sh first-arg exited 1' "$fake/app/osxphotos-nas-mirror.log")" 1 \
-    "the log names the first check as the one that decided"
+    "the run log names the first check as the one that decided"
 
 setup first-check-fails
 add_second_check
@@ -362,7 +388,7 @@ check "$(outcome)" preflight-check-failed "a second check that exits 2 fails the
 check "$(called preflight-check)" called "the first check ran before the second failed"
 check "$(called mount-volume uvx)" none "a failing second check mounts nothing and exports nothing"
 check "$(grep -c 'second-check.sh second-arg other-arg exited 2' "$fake/app/osxphotos-nas-mirror.log")" 1 \
-    "the log names the second check as the one that decided"
+    "the run log names the second check as the one that decided"
 
 setup blank-check
 echo 'PREFLIGHT_CHECKS=("   ")' >> "$fake/test.conf"
@@ -505,6 +531,10 @@ check "$(outcome)" mount-failed "share that will not mount ends with outcome=mou
 check "$(called uvx)" none \
     "share that will not mount does not run osxphotos"
 check "$(notified mount-failed)" yes "share that will not mount posts a notification naming mount-failed"
+check "$(grep -c "See $fake/app/osxphotos-nas-mirror.log\." "$fake/osascript-args.log")" 1 \
+    "a run that fails before the export names the run log in its notification"
+check "$([ -e "$fake/app/exports" ] && echo present || echo absent)" absent \
+    "a run that fails before the export writes no export log"
 
 setup mount-hangs
 : > "$fake/mount-hangs"
@@ -535,8 +565,6 @@ run
 check "$rc" 70 "failed export exits 70"
 check "$(outcome)" export-failed "failed export ends with outcome=export-failed"
 check "$(notified export-failed)" yes "failed export posts a notification naming export-failed"
-check "$(grep -c "See $fake/app/osxphotos-nas-mirror.log\." "$fake/osascript-args.log")" 1 \
-    "with a log file, the notification names it"
 check "$(grep -c 'Terminated' "$fake/stderr")" 0 \
     "posting a notification leaves no job-control noise on stderr"
 check "$([ -e "$fake/Volumes/photos/.osxphotos_export.db" ] && echo copied || echo absent)" absent \
@@ -583,15 +611,15 @@ check "$(notified usage-error)" yes "unknown argument posts a notification namin
 check "$(called uvx)" none \
     "unknown argument does not run osxphotos"
 
-# With no conf there is no log file, so the outcome goes to stderr.
+# With no conf there is no run log, so the outcome goes to stderr.
 setup missing-conf
 rm "$fake/test.conf"
 run
 check "$rc" 64 "missing conf exits 64"
 check "$(grep -c 'outcome=usage-error' "$fake/stderr")" 1 "missing conf reports outcome=usage-error on stderr"
 check "$(notified usage-error)" yes "missing conf posts a notification naming usage-error"
-check "$(grep -c "See this run's error output (under launchd, the agent's log)\." "$fake/osascript-args.log")" 1 \
-    "with no log file, the notification points at the run's error output"
+check "$(grep -c "See this run's error output (under launchd, the run log)\." "$fake/osascript-args.log")" 1 \
+    "with no run log, the notification points at the run's error output"
 check "$(called mount-volume uvx)" none \
     "missing conf neither mounts the share nor runs osxphotos"
 
@@ -641,6 +669,449 @@ check "$([ "$took" -lt 10 ] && echo bounded || echo "hung ${took}s")" bounded \
 check "$(outcome)" export-failed "a notification that hangs does not change the outcome"
 check "$(grep -c 'WARNING: Could not post a notification' "$fake/app/osxphotos-nas-mirror.log")" 1 \
     "a notification that hangs is logged as a warning"
+
+# --- the run log (LOG_FILE) and the export logs (exports/ in the app directory)
+
+# export_logs: the case's export logs, by name, oldest first.
+export_logs() {
+    ls "$fake/app/exports" 2> /dev/null || true
+}
+
+# named_export_log: the export log this case's run log points at.
+named_export_log() {
+    sed -n 's/.*Export log: //p' "$fake/app/osxphotos-nas-mirror.log" | tail -n 1
+}
+
+# old_run_log N: a run log of N lines, "old line 1" to "old line N".
+old_run_log() {
+    mkdir -p "$fake/app"
+    seq 1 "$1" | sed 's/^/old line /' > "$fake/app/osxphotos-nas-mirror.log"
+}
+
+# old_export_logs: nine export logs from earlier runs, a day apart.
+old_export_logs() {
+    mkdir -p "$fake/app/exports"
+    for d in 1 2 3 4 5 6 7 8 9; do
+        echo "an earlier export" > "$fake/app/exports/2020-01-0${d}T00-00-00.log"
+    done
+}
+
+setup logs-ok
+run
+run_log=$fake/app/osxphotos-nas-mirror.log
+export_log=$(named_export_log)
+check "$(outcome)" ok "a run that exports ends ok"
+check "$(dirname "$export_log")" "$fake/app/exports" \
+    "the run log names an export log in exports/ in the app directory"
+check "$(basename "$export_log" | grep -c -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}\.log$')" 1 \
+    "the export log is named after the run's start time, with no colons"
+check "$(export_logs)" "$(basename "$export_log")" "a run that exports writes one export log"
+check "$(grep -c 'Exporting IMG_0001.HEIC' "$export_log")" 1 "the export log holds osxphotos' output"
+check "$(grep -c -e 'Exporting IMG_' -e 'Exported new file' "$run_log")" 0 \
+    "the run log holds none of osxphotos' per-photo lines"
+check "$(grep -c 'Processed: 3 photos, exported: 1, updated: 1, skipped: 1, updated EXIF data: 0, missing: 0, error: 0, touched date: 2$' "$run_log")" 1 \
+    "the run log has osxphotos' summary line"
+check "$(grep -c 'Deleted: 1 file, 0 directories$' "$run_log")" 1 \
+    "the run log has osxphotos' cleanup line"
+
+setup logs-no-summary
+: > "$fake/no-summary"
+run
+check "$(outcome)" ok "an export that prints no summary still ends ok"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "an export that prints no summary leaves a line in the run log saying so"
+
+setup logs-export-failed
+: > "$fake/export-fails"
+run
+export_log=$(named_export_log)
+check "$(outcome)" export-failed "a failed export ends export-failed"
+check "$(grep -c "See $export_log\." "$fake/osascript-args.log")" 1 \
+    "export-failed names the run's export log in its notification"
+check "$(grep -c 'osxphotos: export failed' "$export_log")" 1 \
+    "the export log holds osxphotos' error output"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a failed export with no summary says so in the run log"
+
+setup logs-share-lost
+: > "$fake/share-drops"
+run
+export_log=$(named_export_log)
+check "$(outcome)" share-lost "a share lost during the export ends share-lost"
+check "$(grep -c "See $export_log\." "$fake/osascript-args.log")" 1 \
+    "share-lost names the run's export log in its notification"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "an export stopped by the watchdog says in the run log that it printed no summary"
+
+# exports/ can't be made: here a file is in its way.
+setup logs-no-export-dir
+mkdir -p "$fake/app"
+: > "$fake/app/exports"
+run
+check "$rc" 70 "a run that cannot make exports/ exits 70"
+check "$(outcome)" export-failed "a run that cannot make exports/ ends export-failed"
+check "$(grep -c "See $fake/app/osxphotos-nas-mirror.log\." "$fake/osascript-args.log")" 1 \
+    "a run that cannot make exports/ names the run log in its notification"
+check "$(called uvx)" none "a run that cannot make exports/ does not run osxphotos"
+check "$(grep -c 'Cannot create .*/exports for the export log' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a run that cannot make exports/ says so in the run log"
+
+setup logs-pruned
+old_export_logs
+run
+check "$(export_logs | wc -l | tr -d ' ')" 8 "with 9 export logs, a run that exports leaves 8"
+check "$(export_logs | head -n 7)" "$(for d in 3 4 5 6 7 8 9; do echo "2020-01-0${d}T00-00-00.log"; done)" \
+    "a run that exports keeps the 7 newest earlier export logs"
+check "$(export_logs | tail -n 1)" "$(basename "$(named_export_log)")" \
+    "a run that exports keeps its own export log"
+
+setup logs-skipped-recent
+old_export_logs
+touch "$fake/app/last-ok"
+run
+check "$(outcome)" skipped-recent "a run with a fresh stamp ends skipped-recent"
+check "$(export_logs | wc -l | tr -d ' ')" 9 "a skipped-recent run neither writes nor deletes export logs"
+
+setup logs-skipped-preflight-check
+old_export_logs
+echo 1 > "$fake/preflight-check-exit"
+run
+check "$(export_logs | wc -l | tr -d ' ')" 9 "a skipped-preflight-check run neither writes nor deletes export logs"
+
+setup run-log-trimmed
+old_run_log 10050
+run
+run_log=$fake/app/osxphotos-nas-mirror.log
+old=$(grep -c '^old line ' "$run_log" || true)
+check "$(wc -l < "$run_log" | tr -d ' ')" 10000 "a run log longer than 10,000 lines is trimmed to 10,000"
+check "$(outcome)" ok "the trimmed run log ends with the outcome"
+check "$(head -n 1 "$run_log")" "old line $((10051 - old))" \
+    "the trimmed run log starts where its last 10,000 lines start"
+check "$(grep -n '^old line 10050$' "$run_log" | cut -d: -f1)" "$old" \
+    "the trimmed run log keeps the earlier lines in one piece, before this run's"
+
+setup run-log-short
+old_run_log 20
+run
+check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
+    "a run log under 10,000 lines is not trimmed"
+check "$(grep -c '^old line ' "$fake/app/osxphotos-nas-mirror.log")" 20 \
+    "a run log under 10,000 lines keeps every earlier line"
+
+# The run holding the lock may be writing to the run log, so a run that finds
+# the lock held leaves it alone; the holder trims it when it ends.
+setup run-log-locked
+old_run_log 10050
+hold_lock "$fake/run.lock"
+run
+kill "$holder" 2> /dev/null || true
+wait "$holder" 2> /dev/null || true
+check "$(outcome)" skipped-locked "a run that finds the lock held ends skipped-locked"
+check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
+    "a run that finds the lock held does not trim the run log"
+
+# A skipped run trims too. Here the app directory is read-only, so the trim
+# can't write its new file.
+setup run-log-trim-fails
+old_run_log 10050
+touch "$fake/app/last-ok"
+chmod a-w "$fake/app"
+run
+chmod u+w "$fake/app"
+check "$rc" 0 "a run log that cannot be trimmed does not change the exit code"
+check "$(outcome)" skipped-recent "a run log that cannot be trimmed does not change the outcome"
+check "$(grep -c 'WARNING: Could not trim the run log' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a run log that cannot be trimmed is logged as a warning"
+check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
+    "a run log that cannot be trimmed is left whole"
+
+# --- the metrics textfile (METRICS_TEXTFILE), for node_exporter
+
+prefix=osxphotos_nas_mirror_
+# Every outcome in the fixed set, as finish and the README's table have them.
+all_outcomes="ok skipped-preflight-check skipped-recent skipped-locked usage-error mount-failed share-lost preflight-check-failed export-failed db-copy-failed interrupted no-credentials"
+
+# with_metrics: set METRICS_TEXTFILE for the current case, in a directory of
+# its own, as node_exporter's textfile directory would be. Sets $prom.
+with_metrics() {
+    mkdir -p "$fake/textfile"
+    prom=$fake/textfile/osxphotos_nas_mirror.prom
+    echo 'METRICS_TEXTFILE="'"$prom"'"' >> "$fake/test.conf"
+}
+
+# with_export_db: give the current case a real export database, made with
+# sqlite3 from the schema at the pinned tag, as an earlier run left it, and
+# make the stub osxphotos write to it as a real export would.
+#
+# It is left as osxphotos leaves it, in WAL mode with no -wal or -shm file,
+# which macOS's sqlite3 can't open with -readonly, in a directory whose name
+# has a space, as "Application Support" does. Sets $export_db.
+with_export_db() {
+    export_db="$fake/app/Application Support/osxphotos_export.db"
+    mkdir -p "$(dirname "$export_db")"
+    echo 'OSXPHOTOS_EXPORT_DB="'"$export_db"'"' >> "$fake/test.conf"
+    cat "$root/tests/fixtures/export-db-schema.sql" "$root/tests/fixtures/export-db-earlier-run.sql" |
+        sqlite3 "$export_db" > /dev/null
+    rm -f "$export_db-wal" "$export_db-shm"
+    cp "$root/tests/fixtures/export-db-this-run.sql" "$fake/export-db-this-run.sql"
+}
+
+# wal_files: the export database's -wal and -shm files, if any.
+wal_files() {
+    ls "$export_db-wal" "$export_db-shm" 2> /dev/null || true
+}
+
+# metric NAME [LABELS]: the value of one series in $prom, such as
+# metric last_run_outcome '{outcome="ok"}'. Empty if it isn't there.
+metric() {
+    awk -v want="$prefix$1${2:-}" '$1 == want { print $2 }' "$prom" 2> /dev/null || true
+}
+
+# metric_lines NAME: the HELP, TYPE and sample lines of one metric in FILE
+# ($prom by default).
+metric_lines() {
+    grep -E "^(# (HELP|TYPE) )?$prefix$1( |\\{)" "${2:-$prom}" 2> /dev/null || true
+}
+
+# prom_format: "valid" if $prom is Prometheus text exposition format, else
+# what is wrong. promtool when it is on PATH; otherwise a check of the lines
+# this tool writes: every metric has one HELP and one TYPE line before its
+# samples, names and labels are well formed, every value is a number, and
+# the file ends with a newline.
+prom_format() {
+    if [ ! -f "$prom" ]; then echo "no textfile"; return; fi
+    if command -v promtool > /dev/null 2>&1; then
+        if out=$(promtool check metrics < "$prom" 2>&1); then echo valid; else echo "$out"; fi
+        return
+    fi
+    if [ -n "$(tail -c 1 "$prom")" ]; then echo "no final newline"; return; fi
+    awk '
+        function bad(why) { print "line " NR ": " why ": " $0; failed = 1; exit }
+        /^# HELP / {
+            if ($3 !~ /^[a-zA-Z_:][a-zA-Z0-9_:]*$/ || NF < 4) bad("bad HELP")
+            if (help[$3]++) bad("second HELP")
+            next
+        }
+        /^# TYPE / {
+            if (NF != 4 || $4 !~ /^(counter|gauge|histogram|summary|untyped)$/) bad("bad TYPE")
+            if (!help[$3]) bad("TYPE before HELP")
+            if (type[$3]++) bad("second TYPE")
+            next
+        }
+        /^#/ || /^$/ { bad("stray line") }
+        {
+            if (NF != 2) bad("not NAME VALUE")
+            name = $1
+            sub(/\{.*$/, "", name)
+            if (name !~ /^[a-zA-Z_:][a-zA-Z0-9_:]*$/) bad("bad name")
+            labels = substr($1, length(name) + 1)
+            if (labels != "" && labels !~ /^\{[a-zA-Z_][a-zA-Z0-9_]*="[^"]*"(,[a-zA-Z_][a-zA-Z0-9_]*="[^"]*")*\}$/) bad("bad labels")
+            if ($2 !~ /^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$/) bad("bad value")
+            if (!type[name]) bad("sample before its TYPE")
+            if (seen[$1]++) bad("second sample")
+        }
+        END { if (!failed) print "valid" }
+    ' "$prom"
+}
+
+# outcome_series: each outcome's series value, "name=value" a line, in
+# all_outcomes order.
+outcome_series() {
+    for o in $all_outcomes; do
+        echo "$o=$(metric last_run_outcome "{outcome=\"$o\"}")"
+    done
+}
+
+# want_outcome_series OUTCOME: outcome_series as it should be when the run
+# ended OUTCOME.
+want_outcome_series() {
+    for o in $all_outcomes; do
+        if [ "$o" = "$1" ]; then echo "$o=1"; else echo "$o=0"; fi
+    done
+}
+
+# textfile_dir: what is in the case's textfile directory.
+textfile_dir() {
+    ls -A "$fake/textfile" 2> /dev/null || true
+}
+
+setup metrics-ok
+with_metrics
+with_export_db
+before=$(date +%s)
+run
+after=$(date +%s)
+check "$rc" 0 "a run with METRICS_TEXTFILE set exits 0"
+check "$(outcome)" ok "a run with METRICS_TEXTFILE set ends ok"
+check "$(prom_format)" valid "the metrics textfile is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series ok)" \
+    "an ok run sets the ok outcome series to 1 and every other outcome's to 0"
+check "$(grep -c "^${prefix}last_run_outcome{" "$prom")" 12 \
+    "the textfile has one outcome series for each of the 12 outcomes"
+ended=$(metric last_run_timestamp_seconds)
+check "$([ "$ended" -ge "$before" ] && [ "$ended" -le "$after" ] && echo during || echo "$ended")" during \
+    "last_run_timestamp_seconds is when the run ended"
+check "$(metric last_ok_timestamp_seconds)" "$(stat -f %m "$fake/app/last-ok")" \
+    "last_ok_timestamp_seconds is the last-ok stamp's mtime"
+check "$(metric last_run_duration_seconds | grep -c -E '^[0-9]+$')" 1 \
+    "last_run_duration_seconds is a whole number of seconds"
+check "$(metric last_export_duration_seconds | grep -c -E '^[0-9]+$')" 1 \
+    "last_export_duration_seconds is a whole number of seconds"
+check "$(for r in exported updated skipped missing error; do metric last_export_files "{result=\"$r\"}"; done | tr '\n' ' ')" \
+    "1 1 1 0 0 " "the last export's file counts come from osxphotos' summary line"
+check "$(metric last_export_photos)" 3 "last_export_photos is the summary's photo count"
+check "$(metric last_export_deleted_files)" 1 \
+    "last_export_deleted_files is the cleanup line's file count"
+check "$(wal_files)" "" "the stub osxphotos leaves the export database with no -wal or -shm file"
+check "$(grep -c 'WARNING' "$fake/app/osxphotos-nas-mirror.log")" 0 \
+    "the metrics read an export database with no -wal or -shm file, in a path with a space, with no warning"
+check "$(metric export_db_bytes)" "$(stat -f %z "$export_db")" \
+    "export_db_bytes is the export database's size"
+check "$(metric mirror_files)" 6 \
+    "mirror_files counts the files this export kept or wrote, not cleaned-up or missing ones"
+check "$(metric mirror_bytes)" 7800 "mirror_bytes is those files' sizes"
+check "$(metric last_export_bytes)" 5600 \
+    "last_export_bytes is the size of the files this export wrote, new and updated"
+check "$(textfile_dir)" osxphotos_nas_mirror.prom \
+    "writing the metrics textfile leaves no temp file behind"
+
+# A failing run: the outcome series, and the run's own timestamp.
+setup metrics-mount-failed
+with_metrics
+: > "$fake/mount-fails"
+run
+check "$rc" 69 "metrics do not change a failing run's exit code"
+check "$(prom_format)" valid "a failing run's metrics textfile is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series mount-failed)" \
+    "a mount-failed run sets mount-failed to 1 and every other outcome to 0"
+check "$(metric_lines last_ok_timestamp_seconds)" "" \
+    "with no last-ok stamp the textfile has no last_ok_timestamp_seconds"
+check "$(metric_lines mirror_files)" "" \
+    "a run with no export and no earlier textfile has no mirror_files"
+
+# ok_metric_lines NAME: metric_lines NAME from the ok run's textfile, which
+# must have it.
+ok_metric_lines() {
+    metric_lines "$1" "$fake/after-ok.prom" | grep . || echo "(no $1 after the ok run)"
+}
+
+# An ok run, then a skipped one, then a failed one. The skipped run keeps
+# every value but the run timestamp and the outcome series; the failed one
+# also updates the run's duration.
+setup metrics-carried
+with_metrics
+with_export_db
+run
+cp "$prom" "$fake/after-ok.prom" 2> /dev/null || : > "$fake/after-ok.prom"
+sleep 1
+run
+check "$(outcome)" skipped-recent "a run after an ok one is skipped-recent"
+check "$(prom_format)" valid "a skipped run's metrics textfile is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series skipped-recent)" \
+    "a skipped-recent run sets its own outcome series"
+ok_ended=$(awk -v n="${prefix}last_run_timestamp_seconds" '$1 == n { print $2 }' "$fake/after-ok.prom" 2> /dev/null || true)
+check "$([ "$(metric last_run_timestamp_seconds)" -gt "$ok_ended" ] && echo new || echo old)" new \
+    "a skipped run updates last_run_timestamp_seconds"
+for name in last_run_duration_seconds last_export_duration_seconds last_export_timestamp_seconds \
+    last_export_files last_export_photos last_export_deleted_files mirror_files mirror_bytes last_export_bytes \
+    last_ok_timestamp_seconds; do
+    check "$(metric_lines "$name")" "$(ok_metric_lines "$name")" \
+        "a skipped run keeps the last ok run's $name"
+done
+# The ok run left the share mounted: unmount it, and it won't mount again.
+: > "$fake/mounts"
+: > "$fake/mount-fails"
+run --force
+check "$(outcome)" mount-failed "a forced run that cannot mount ends mount-failed"
+check "$(prom_format)" valid "a failed run's textfile, after an ok run's, is in Prometheus text format"
+check "$(outcome_series)" "$(want_outcome_series mount-failed)" \
+    "a failed run after an ok one sets its own outcome series"
+for name in last_export_duration_seconds last_export_files mirror_files mirror_bytes last_export_bytes; do
+    check "$(metric_lines "$name")" "$(ok_metric_lines "$name")" \
+        "a failed run keeps the last ok run's $name"
+done
+check "$(textfile_dir)" osxphotos_nas_mirror.prom "carrying metrics over leaves no temp file behind"
+
+setup metrics-unset
+run
+check "$(outcome)" ok "a run with no METRICS_TEXTFILE ends ok"
+check "$(find "$fake" -name '*.prom*' | wc -l | tr -d ' ')" 0 \
+    "with no METRICS_TEXTFILE, no metrics textfile is written"
+
+# The textfile's directory is read-only: the temp file can't be written.
+setup metrics-unwritable
+with_metrics
+chmod a-w "$fake/textfile"
+run
+chmod u+w "$fake/textfile"
+check "$rc" 0 "a metrics textfile that cannot be written does not change the exit code"
+check "$(outcome)" ok "a metrics textfile that cannot be written does not change the outcome"
+check "$(grep -c "WARNING: Could not write the metrics textfile $prom" "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a metrics textfile that cannot be written is logged as a warning"
+check "$(textfile_dir)" "" "a metrics textfile that cannot be written leaves nothing behind"
+
+# The textfile's path is a directory: the temp file is written, but can't
+# replace it.
+setup metrics-path-is-a-directory
+with_metrics
+mkdir "$prom"
+: > "$fake/mount-fails"
+run
+check "$rc" 69 "a metrics path that is a directory does not change the exit code"
+check "$(outcome)" mount-failed "a metrics path that is a directory does not change the outcome"
+check "$(grep -c 'WARNING: Could not write the metrics textfile' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a metrics path that is a directory is logged as a warning"
+check "$(textfile_dir)" osxphotos_nas_mirror.prom "a textfile that cannot replace its path leaves no temp file behind"
+check "$(ls -A "$prom")" "" "a textfile that cannot replace its path is not moved into it"
+
+# An export database sqlite3 can't read: the run ends as it would have, with
+# no database metrics.
+setup metrics-db-unreadable
+with_metrics
+run
+check "$(outcome)" ok "an export database the metrics cannot read does not change the outcome"
+check "$(grep -c 'WARNING: Could not read the mirror' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "an export database the metrics cannot read is logged as a warning"
+check "$(metric_lines mirror_files)" "" "an unreadable export database gives no mirror_files"
+check "$(prom_format)" valid "the textfile with no database metrics is still Prometheus text format"
+check "$(grep -c 'WARNING: Could not read the mirror.*not a database' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "the warning for an unreadable export database has sqlite3's error"
+
+# A textfile from an earlier run with a broken metric: a skipped run carries
+# the metrics that are whole and drops the others.
+setup metrics-carry-malformed
+with_metrics
+mkdir -p "$fake/app"
+touch "$fake/app/last-ok"
+cat > "$prom" <<PROM
+# HELP ${prefix}mirror_files Files.
+# TYPE ${prefix}mirror_files gauge
+# TYPE ${prefix}mirror_files gauge
+${prefix}mirror_files 6
+${prefix}mirror_bytes 7800
+# HELP ${prefix}last_export_bytes Bytes.
+# TYPE ${prefix}last_export_bytes gauge
+# HELP ${prefix}last_export_photos Photos.
+# TYPE ${prefix}last_export_photos gauge
+${prefix}last_export_photos 3
+PROM
+run
+check "$(outcome)" skipped-recent "a run with a broken earlier textfile is skipped-recent"
+check "$(prom_format)" valid "a textfile carried from a broken one is Prometheus text format"
+check "$(metric_lines mirror_files)" "" "a metric with two TYPE lines is not carried over"
+check "$(metric_lines mirror_bytes)" "" "a metric with no HELP or TYPE is not carried over"
+check "$(metric_lines last_export_bytes)" "" "a metric with no sample is not carried over"
+check "$(metric last_export_photos)" 3 "a whole metric next to broken ones is carried over"
+
+setup metrics-relative-path
+echo 'METRICS_TEXTFILE="osxphotos_nas_mirror.prom"' >> "$fake/test.conf"
+run
+check "$rc" 0 "a relative METRICS_TEXTFILE does not change the exit code"
+check "$(outcome)" ok "a relative METRICS_TEXTFILE does not change the outcome"
+check "$(grep -c 'WARNING: METRICS_TEXTFILE .* is not an absolute path' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a relative METRICS_TEXTFILE is logged as a warning"
+check "$(find "$fake" -name '*.prom*' | wc -l | tr -d ' ')" 0 \
+    "with a relative METRICS_TEXTFILE, no metrics textfile is written"
 
 # --- the run lock: a kernel lock (flock) on LOCK_FILE, held by the run and
 # by the export it starts
@@ -705,6 +1176,10 @@ check "$(alive "$export_pid")" gone "SIGTERM to a run stops its export"
 check "$rc" 75 "a run stopped with SIGTERM exits 75"
 check "$(outcome)" interrupted "a run stopped with SIGTERM ends with outcome=interrupted"
 check "$(notified interrupted)" yes "a run stopped with SIGTERM posts a notification naming interrupted"
+check "$(grep -c "See $(named_export_log)\." "$fake/osascript-args.log")" 1 \
+    "a run stopped mid-export names its export log in the notification"
+check "$(grep -c 'osxphotos printed no summary' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a run stopped mid-export says in the run log that osxphotos printed no summary"
 check "$([ -e "$fake/Volumes/photos/.osxphotos_export.db" ] && echo copied || echo absent)" absent \
     "a run stopped with SIGTERM does not copy the export database"
 check "$([ -e "$fake/app/last-ok" ] && echo yes || echo no)" no "a run stopped with SIGTERM writes no stamp"

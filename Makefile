@@ -15,13 +15,14 @@ FILL = esc() { printf '%s' "$$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/
 help: ## List targets
 	@grep -E '^[a-z]+:.*## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
 
-test: lint ## shellcheck, then the fixture tests for osxphotos-nas-mirror.sh, the preflight checks and make install
+test: lint ## shellcheck, plutil and jq, then the fixture tests for osxphotos-nas-mirror.sh, the preflight checks and make install
 	tests/mirror-run.sh
 	tests/preflight-checks.sh
 	tests/install.sh
 
-lint: ## shellcheck the scripts, plutil the launchd agent (a filled-in copy of the template)
+lint: ## shellcheck the scripts, plutil the launchd agent (a filled-in copy of the template), jq the example dashboard
 	shellcheck -x osxphotos-nas-mirror.sh tests/*.sh preflight-checks/*.sh
+	tests/grafana-dashboard.sh
 	@tmp=$$(mktemp) && \
 	$(FILL) > "$$tmp" && \
 	plutil -lint "$$tmp"; rc=$$?; rm -f "$$tmp"; exit $$rc
