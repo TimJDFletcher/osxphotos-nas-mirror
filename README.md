@@ -169,7 +169,7 @@ The first doesn't fire while there's no stamp at all; add `absent(osxphotos_nas_
 
 ![The example dashboard, showing made-up data for two Macs](docs/images/grafana-dashboard.png)
 
-The top row has the time since the last good run (green under 7 days, the gap the recency gate allows, amber to 8, red after), each Mac's last outcome, and the files and bytes in the mirror. Below that are the outcome history, the age of the last good run over time, and the runs in the time range that weren't skipped. The Exports row has the run and export durations, the files each export wrote, updated and removed, the bytes it wrote a second, and the export database's size.
+It shows the last 30 days on one screen. The top row has the time since the last good run (green under 7 days, the gap the recency gate allows, amber to 8, red after), each Mac's last outcome, and the files and bytes in the mirror. Below that are the run duration, the files each export wrote, updated and removed, and the bytes it wrote a second; then the outcome history beside the export database's size; and last, the runs in the time range that weren't skipped.
 
 The outcome history shows the most notable outcome in each interval on screen, a failure over ok and ok over a skip, so a run that ended minutes before the next skipped one still shows. The screenshot is of made-up data: five weeks of hourly runs from a Mac that stays at home and a laptop that sleeps at night and is away some days.
 

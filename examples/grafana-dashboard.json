@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Photos library mirror runs: health first, with big status panels and the outcome history.",
+  "description": "Photos library mirror runs: one row of status, then the trends and the runs.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -104,17 +104,14 @@
         "graphMode": "none",
         "justifyMode": "auto",
         "wideLayout": true,
-        "showPercentChange": false,
-        "text": {
-          "valueSize": 44
-        }
+        "showPercentChange": false
       },
       "id": 1,
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 7,
-        "h": 6
+        "w": 6,
+        "h": 4
       }
     },
     {
@@ -238,17 +235,14 @@
         "graphMode": "none",
         "justifyMode": "auto",
         "wideLayout": true,
-        "showPercentChange": false,
-        "text": {
-          "valueSize": 26
-        }
+        "showPercentChange": false
       },
       "id": 2,
       "gridPos": {
-        "x": 7,
+        "x": 6,
         "y": 0,
-        "w": 7,
-        "h": 6
+        "w": 6,
+        "h": 4
       }
     },
     {
@@ -301,23 +295,20 @@
           "fields": "",
           "values": false
         },
-        "orientation": "horizontal",
+        "orientation": "auto",
         "textMode": "auto",
         "colorMode": "none",
         "graphMode": "none",
         "justifyMode": "auto",
         "wideLayout": true,
-        "showPercentChange": false,
-        "text": {
-          "valueSize": 30
-        }
+        "showPercentChange": false
       },
       "id": 3,
       "gridPos": {
-        "x": 14,
+        "x": 12,
         "y": 0,
-        "w": 5,
-        "h": 6
+        "w": 6,
+        "h": 4
       }
     },
     {
@@ -370,23 +361,280 @@
           "fields": "",
           "values": false
         },
-        "orientation": "horizontal",
+        "orientation": "auto",
         "textMode": "auto",
         "colorMode": "none",
         "graphMode": "none",
         "justifyMode": "auto",
         "wideLayout": true,
-        "showPercentChange": false,
-        "text": {
-          "valueSize": 30
-        }
+        "showPercentChange": false
       },
       "id": 4,
       "gridPos": {
-        "x": 19,
+        "x": 18,
         "y": 0,
-        "w": 5,
-        "h": 6
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Run duration",
+      "description": "How long the last run that wasn't skipped took. A short dip is a run that failed early, such as mount-failed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "osxphotos_nas_mirror_last_run_duration_seconds{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Files exported, updated and removed per export",
+      "description": "From osxphotos' summary: new files exported, files updated and files cleanup removed from the share, one point per export.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "last_over_time(osxphotos_nas_mirror_last_export_files{instance=~\"$instance\", result=~\"exported|updated\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))",
+          "legendFormat": "{{instance}} {{result}}",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "last_over_time(osxphotos_nas_mirror_last_export_deleted_files{instance=~\"$instance\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))",
+          "legendFormat": "{{instance}} removed",
+          "refId": "B",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "points",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "always",
+            "pointSize": 9,
+            "spanNulls": false,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "interval": "1h",
+      "maxDataPoints": 100000,
+      "id": 6,
+      "gridPos": {
+        "x": 8,
+        "y": 4,
+        "w": 8,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Export throughput",
+      "description": "Bytes the last ok export wrote (new and updated files) over its duration.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "osxphotos_nas_mirror_last_export_bytes{instance=~\"$instance\"} / osxphotos_nas_mirror_last_export_duration_seconds{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} written",
+          "refId": "A",
+          "range": true,
+          "instant": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "pointSize": 5,
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 7,
+      "gridPos": {
+        "x": 16,
+        "y": 4,
+        "w": 8,
+        "h": 8
       }
     },
     {
@@ -498,7 +746,7 @@
         "mergeValues": true,
         "showValue": "never",
         "alignValue": "left",
-        "rowHeight": 0.75,
+        "rowHeight": 0.7,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
@@ -509,18 +757,18 @@
           "sort": "none"
         }
       },
-      "id": 5,
+      "id": 8,
       "gridPos": {
         "x": 0,
-        "y": 6,
-        "w": 24,
-        "h": 6
+        "y": 12,
+        "w": 16,
+        "h": 7
       }
     },
     {
       "type": "timeseries",
-      "title": "Age of the last good run",
-      "description": "Time since the last ok run ended (the last-ok stamp). Green under 7 days, the gap the recency gate allows; amber to 8 days; red after.",
+      "title": "Export database size",
+      "description": "export_db_bytes. It grows by a history row per file every export.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -531,7 +779,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(time() - max by (instance) (last_over_time(osxphotos_nas_mirror_last_ok_timestamp_seconds{instance=~\"$instance\"}[30d]))) / 86400",
+          "expr": "osxphotos_nas_mirror_export_db_bytes{instance=~\"$instance\"}",
           "legendFormat": "{{instance}}",
           "refId": "A",
           "range": true,
@@ -541,15 +789,15 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "suffix: days",
+          "unit": "decbytes",
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
             "drawStyle": "line",
-            "lineInterpolation": "linear",
+            "lineInterpolation": "stepAfter",
             "lineWidth": 2,
-            "fillOpacity": 0,
+            "fillOpacity": 10,
             "gradientMode": "none",
             "showPoints": "never",
             "pointSize": 5,
@@ -561,7 +809,7 @@
               "group": "A"
             },
             "thresholdsStyle": {
-              "mode": "line+area"
+              "mode": "off"
             },
             "scaleDistribution": {
               "type": "linear"
@@ -573,14 +821,6 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "#EAB839",
-                "value": 7
-              },
-              {
-                "color": "red",
-                "value": 8
               }
             ]
           }
@@ -599,12 +839,12 @@
           "sort": "desc"
         }
       },
-      "id": 6,
+      "id": 9,
       "gridPos": {
-        "x": 0,
+        "x": 16,
         "y": 12,
-        "w": 12,
-        "h": 8
+        "w": 8,
+        "h": 7
       }
     },
     {
@@ -816,379 +1056,12 @@
           }
         ]
       },
-      "id": 7,
-      "gridPos": {
-        "x": 12,
-        "y": 12,
-        "w": 12,
-        "h": 8
-      }
-    },
-    {
-      "type": "row",
-      "title": "Exports",
-      "collapsed": false,
-      "panels": [],
-      "id": 8,
-      "gridPos": {
-        "x": 0,
-        "y": 20,
-        "w": 24,
-        "h": 1
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Run duration",
-      "description": "How long the last run that wasn't skipped took, and its export. A short dip is a run that failed early, such as mount-failed.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "osxphotos_nas_mirror_last_run_duration_seconds{instance=~\"$instance\"}",
-          "legendFormat": "{{instance}} run",
-          "refId": "A",
-          "range": true,
-          "instant": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "osxphotos_nas_mirror_last_export_duration_seconds{instance=~\"$instance\"}",
-          "legendFormat": "{{instance}} export",
-          "refId": "B",
-          "range": true,
-          "instant": false,
-          "editorMode": "code"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            },
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "id": 9,
-      "gridPos": {
-        "x": 0,
-        "y": 21,
-        "w": 8,
-        "h": 7
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Files exported, updated and removed per export",
-      "description": "From osxphotos' summary: new files exported, files updated and files cleanup removed from the share, one point per export.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "last_over_time(osxphotos_nas_mirror_last_export_files{instance=~\"$instance\", result=~\"exported|updated\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))",
-          "legendFormat": "{{instance}} {{result}}",
-          "refId": "A",
-          "range": true,
-          "instant": false,
-          "editorMode": "code"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "last_over_time(osxphotos_nas_mirror_last_export_deleted_files{instance=~\"$instance\"}[$__interval])\n  and on (instance, job) (last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[$__interval]) != last_over_time(osxphotos_nas_mirror_last_export_timestamp_seconds{instance=~\"$instance\"}[1d] offset $__interval))",
-          "legendFormat": "{{instance}} removed",
-          "refId": "B",
-          "range": true,
-          "instant": false,
-          "editorMode": "code"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "points",
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "showPoints": "always",
-            "pointSize": 9,
-            "spanNulls": false,
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            },
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "interval": "1h",
-      "maxDataPoints": 100000,
       "id": 10,
       "gridPos": {
-        "x": 8,
-        "y": 21,
-        "w": 8,
-        "h": 7
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Export throughput",
-      "description": "Bytes the last ok export wrote (new and updated files) over its duration.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "osxphotos_nas_mirror_last_export_bytes{instance=~\"$instance\"} / osxphotos_nas_mirror_last_export_duration_seconds{instance=~\"$instance\"}",
-          "legendFormat": "{{instance}} written",
-          "refId": "A",
-          "range": true,
-          "instant": false,
-          "editorMode": "code"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Bps",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            },
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "id": 11,
-      "gridPos": {
-        "x": 16,
-        "y": 21,
-        "w": 8,
-        "h": 7
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Export database size",
-      "description": "export_db_bytes. It grows by a history row per file every export.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "osxphotos_nas_mirror_export_db_bytes{instance=~\"$instance\"}",
-          "legendFormat": "{{instance}}",
-          "refId": "A",
-          "range": true,
-          "instant": false,
-          "editorMode": "code"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "decbytes",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 2,
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "showPoints": "never",
-            "pointSize": 5,
-            "spanNulls": true,
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            },
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "id": 12,
-      "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 19,
         "w": 24,
-        "h": 5
+        "h": 8
       }
     }
   ],
@@ -1250,7 +1123,7 @@
     ]
   },
   "time": {
-    "from": "now-14d",
+    "from": "now-30d",
     "to": "now"
   },
   "timepicker": {},
