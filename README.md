@@ -76,7 +76,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 
 3.  Save the SMB password the Finder way. In Finder choose Go > Connect to Server, enter `smb://NAS_USER@NAS_HOSTNAME/NAS_SHARE` with your values from the conf, type the password and tick "Remember this password in my keychain". Each run checks the login keychain before mounting and ends in `no-credentials` if there is no entry, so a run never raises a password dialog.
 
-4.  Give the program that runs the script Full Disk Access, so osxphotos can read the Photos library. Run by hand, that is your terminal app. Run by launchd, it is `/bin/bash`, which is what launchd runs the script with. In System Settings > Privacy & Security > Full Disk Access, click +, press Cmd+Shift+G, type `/bin/bash` and add it.
+4.  Give the program that runs the script Full Disk Access, so it can read the Photos library and write to the share. Run by hand, that is your terminal app. Run by launchd, it is `/bin/bash`, which is what launchd runs the script with. In System Settings > Privacy & Security > Full Disk Access, click +, press Cmd+Shift+G, type `/bin/bash` and add it. Check this even if the export works: osxphotos can get its own access, but the script's copy of the export database runs as `/bin/bash`, and without the grant macOS refuses it. The run then exports everything and ends `db-copy-failed` with `Operation not permitted`, and because only an `ok` run touches the `last-ok` stamp, it runs again every hour.
 
 5.  Run it once by hand with `--force` (see Usage). The first run mirrors the whole library, so it takes a long time.
 
