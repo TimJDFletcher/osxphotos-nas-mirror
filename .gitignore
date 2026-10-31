@@ -2,3 +2,5 @@
 *.conf
 # Claude Code agent worktrees.
 /.claude/worktrees/
+# make app.
+/build/

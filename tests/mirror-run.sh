@@ -274,6 +274,23 @@ check "$(cat "$fake/uvx-args.log")" "$want_args" \
 check "$(cat "$fake/mount-volume-args.log")" "smb://tim@nas.test/photos" \
     "plain run mounts the share as Finder does"
 
+# In the app, the script runs the Python beside it, not uvx.
+setup bundled-python
+mkdir -p "$fake/app-resources/python/bin" "$fake/app-resources"
+cp "$root/osxphotos-nas-mirror.sh" "$root/osxphotos.toml" "$fake/app-resources/"
+cat > "$fake/app-resources/python/bin/python3.13" <<PYTHON
+#!/bin/sh
+printf '%s\n' "\$@" > "$fake/python-args.log"
+PYTHON
+chmod +x "$fake/app-resources/python/bin/python3.13"
+rc=0
+mkdir -p "$fake/home"
+env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" \
+    "$fake/app-resources/osxphotos-nas-mirror.sh" > "$fake/stdout" 2> "$fake/stderr" || rc=$?
+check "$(sed -n 1,4p "$fake/python-args.log" 2>/dev/null | tr '\n' ' ')" "-B -m osxphotos export " \
+    "in the app, the export runs on the bundled Python and writes no .pyc"
+check "$(called uvx)" none "in the app, uvx isn't used"
+
 # Run by a relative path from another directory, the script must still find
 # its own directory, where osxphotos.toml is.
 setup relative-invocation

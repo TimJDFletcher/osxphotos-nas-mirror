@@ -668,6 +668,8 @@ log "Export log: $export_log"
 # RhetTbull/osxphotos#2265 and #2266); it goes back to a PyPI pin once
 # upstream releases the fixes.
 # OSXPHOTOS_CONFIG in the conf is the osxphotos TOML; unset, the repo's.
+# In the app, a Python with that pin is beside the script, and it runs that
+# unless the conf names a source. -B: a .pyc would break the app's signature.
 #
 # It runs in the background, watched: osxphotos logs a file it can't write
 # and carries on, and exits 0, so a share that drops mid-run would otherwise
@@ -691,9 +693,12 @@ if [ -n "${METRICS_TEXTFILE:-}" ]; then
 fi
 export_started=$SECONDS
 default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@v0.77.2-tim.3
-uvx --python 3.13 \
-    --from "${OSXPHOTOS_SOURCE:-$default_osxphotos_source}" \
-    osxphotos export \
+if [ -z "${OSXPHOTOS_SOURCE:-}" ] && [ -x "$SCRIPT_DIR/python/bin/python3.13" ]; then
+    osxphotos=("$SCRIPT_DIR/python/bin/python3.13" -B -m osxphotos)
+else
+    osxphotos=(uvx --python 3.13 --from "${OSXPHOTOS_SOURCE:-$default_osxphotos_source}" osxphotos)
+fi
+"${osxphotos[@]}" export \
     --newest-first \
     --load-config "${OSXPHOTOS_CONFIG:-$SCRIPT_DIR/osxphotos.toml}" \
     --exportdb "$OSXPHOTOS_EXPORT_DB" "$EXPORT_DIR" > "$export_log" 2>&1 &

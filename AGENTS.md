@@ -2,7 +2,7 @@
 
 Mirrors a Mac's Photos library to an SMB share on a NAS with osxphotos, unattended under launchd. It was called `icloud-photos-backup` before; old notes, issues and the local directory name may still use that.
 
-Read `GLOSSARY.md` first and use its terms (run, outcome, preflight check, run log, export log, metrics textfile, run lock, share, mirror, archive, export database). Read the `docs/adr/` entries for the area you touch: they hold the reasons behind the mounting, the export database, the osxphotos pin, the mirror, the keychain check and the run lock. README.md is the user's manual (outcomes table, setup); don't copy it here.
+Read `GLOSSARY.md` first and use its terms (run, outcome, preflight check, run log, export log, metrics textfile, run lock, share, mirror, archive, export database). Read the `docs/adr/` entries for the area you touch: they hold the reasons behind the mounting, the export database, the osxphotos pin, the mirror, the keychain check, the run lock and the app. README.md is the user's manual (outcomes table, setup); don't copy it here.
 
 ## Layout
 
@@ -12,7 +12,8 @@ Read `GLOSSARY.md` first and use its terms (run, outcome, preflight check, run l
 - The metrics textfile, `METRICS_TEXTFILE` (optional, wherever node_exporter's textfile collector looks, not in the app dir), is written by `finish` on every outcome; metrics a run has no value for are carried over from the file as it was, and `mirror_files`/`mirror_bytes` come from the export database's `history` rows for the export, read with `sqlite3` as an `immutable=1` URI, because macOS's sqlite3 can't open a WAL database read-only once osxphotos has removed its -wal and -shm files (`export_db_read` and `mirror_from_export_db` say why, and why not `export_data`); a relative path is a warning.
 - `osxphotos.toml`: the osxphotos config the script loads (`OSXPHOTOS_CONFIG` overrides). `examples/osxphotos-exif.toml` is an unused alternative. `examples/grafana-dashboard.json` is an example dashboard for the metrics; `tests/grafana-dashboard.sh` (with `tests/grafana-dashboard.jq`) is its lint.
 - `preflight-checks/{dock-connected,network-path,download-speed,nas-rtt}.sh`: example checks. `PREFLIGHT_CHECKS` in the conf is an array of strings, each a command and arguments split on whitespace; a relative path resolves against the script's directory. They run in order and the first that doesn't exit 0 decides: 1 ends `skipped-preflight-check`, anything else ends `preflight-check-failed`.
-- `launchd/*.plist.template`: `make install` fills it in and copies it to `~/Library/LaunchAgents` (label `io.github.timjdfletcher.osxphotos-nas-mirror`, on the hour every hour (`StartCalendarInterval`; the script's own 7 x 24-hour gate makes the mirror weekly), stdout to `/dev/null` because the script logs its own lines, stderr to the run log, `PATH` including `/opt/homebrew/bin` for `uv`). It doesn't run `launchctl`.
+- `launchd/build-app.sh` (with `runner.c`, `Info.plist`, `icon.png`, drawn from `icon.svg`): `make app` builds `build/osxphotos-nas-mirror.app`, holding the script, its config and checks, and a private Python with osxphotos, signed with `SIGN_IDENTITY` (default the `osxphotos-nas-mirror local signing` certificate). `make package` zips it. The agent runs the app, so a run has the app's permissions, not `/bin/bash`'s, and a run doesn't see edits in the checkout until the app is rebuilt and installed (ADR 0007).
+- `launchd/*.plist.template`: `make install` copies the app to `~/Applications`, fills the template in and copies it to `~/Library/LaunchAgents` (label `io.github.timjdfletcher.osxphotos-nas-mirror`, on the hour every hour (`StartCalendarInterval`; the script's own 7 x 24-hour gate makes the mirror weekly), stdout to `/dev/null` because the script logs its own lines, stderr to the run log). It doesn't run `launchctl`.
 
 ## Outcomes
 
@@ -20,7 +21,7 @@ Every run ends through `finish`, which sends a macOS notification on a non-zero 
 
 ## Rules
 
-- Before editing `osxphotos-nas-mirror.sh`, check no run is in progress: `ps -ax | grep -E '[o]sxphotos-nas-mirror|[o]sxphotos export'`. Editing a running script corrupts that run. If one is listed, wait or tell the user.
+- Before editing `osxphotos-nas-mirror.sh` in a checkout that a run could be using, check no run is in progress: `ps -ax | grep -E '[o]sxphotos-nas-mirror|[o]sxphotos export'`. Editing a running script corrupts that run. If one is listed, wait or tell the user.
 - Never run the script against the real conf from a test or an experiment: the stubs would write a fake export database over the real one. Tests set `OSXPHOTOS_NAS_MIRROR_CONF`.
 - The owner runs real runs. Mounts and keychain access fail or are blocked from an agent's shell, so test with the stubs and leave real runs to the user.
 - Don't raise a password dialog (ADR 0005). The tool never saves passwords; the user does it once in Finder.
@@ -42,7 +43,7 @@ README ("Prerequisites") is the user-facing copy; keep the two in agreement. Whe
 
 ## Why the osxphotos setup is the way it is
 
-The ADRs hold the reasons for the big choices: the mount (0001), the export database on the SSD and no `--ramdb` (0002), uvx and the fork pin (0003), `cleanup = true` and the mirror (0004), the run lock that the export inherits (0006). What they don't hold:
+The ADRs hold the reasons for the big choices: the mount (0001), the export database on the SSD and no `--ramdb` (0002), uvx and the fork pin (0003), `cleanup = true` and the mirror (0004), the run lock that the export inherits (0006), the self-contained app launchd runs (0007). What they don't hold:
 
 - No `--limit`: it caps one run's photo count and gives no resumption. Resumption comes from `update = true` and the export database. The script exports the whole library in one run, newest first.
 - No `overwrite` in `osxphotos.toml`: in update mode it only changes what happens when two photos map to the same file name (the second overwrites the first instead of becoming `name (1).ext`).

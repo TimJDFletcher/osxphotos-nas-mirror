@@ -10,7 +10,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 
 * The source is the local Photos library (the System Library).
 * The destination is the share, mounted the way Finder mounts it, under `/Volumes` (usually `/Volumes/photos`; see `docs/adr/0001-mount-the-share-as-finder-does.md`).
-* osxphotos runs through `uv` for the export, AppleScript's `mount volume` does the mount, and `launchd` does the scheduling.
+* osxphotos does the export, from a private Python in the app under launchd and through `uv` from a checkout, AppleScript's `mount volume` does the mount, and `launchd` does the scheduling.
 * The osxphotos export database stays on the Mac's SSD in `~/Library/Application Support/osxphotos-nas-mirror/`. After each successful run the script copies it to the share as `.osxphotos_export.db`.
 
 ## Files
@@ -26,12 +26,13 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 | `preflight-checks/nas-rtt.sh` | `nas-rtt.sh HOST MAX_MS` skips the run unless HOST answers a ping with an average round trip of at most MAX_MS. Suits a NAS on the home LAN. |
 | `examples/osxphotos-exif.toml` | An alternative config that also writes metadata with exiftool, XMP sidecars and Finder tags. The script doesn't use it; point `OSXPHOTOS_CONFIG` at a copy to use it. |
 | `examples/grafana-dashboard.json` | An example Grafana dashboard for the metrics (see "Example dashboard"). |
-| `launchd/io.github.timjdfletcher.osxphotos-nas-mirror.plist.template` | The launchd agent that runs the script, with `@REPO@` and `@HOME@` placeholders that `make install` fills in. |
+| `launchd/io.github.timjdfletcher.osxphotos-nas-mirror.plist.template` | The launchd agent that runs the app, with a `@HOME@` placeholder that `make install` fills in. |
+| `launchd/build-app.sh`, `launchd/runner.c`, `launchd/Info.plist`, `launchd/icon.png` | What `make app` builds the app from (see Automation). |
 
 ## Prerequisites
 
 1.  A Mac running macOS, with Photos set to "Download Originals" or able to download them on demand (the config sets `download_missing`).
-2.  `uv` and `git`. Install uv with `brew install uv`; git comes with the Xcode command line tools. The script runs osxphotos through uv, as `uvx --python 3.13 --from git+https://github.com/TimJDFletcher/osxphotos@<tag> osxphotos`, so osxphotos gets its own Python environment. uv clones and builds it on the first run, which takes a while. Homebrew's osxphotos formula doesn't work for this: it broke when Homebrew's `cffi` dropped Python 3.13 (`No module named '_cffi_backend'`).
+2.  `uv` and `git`, to build the app or run from a checkout. Install uv with `brew install uv`; git comes with the Xcode command line tools. The script runs osxphotos through uv, as `uvx --python 3.13 --from git+https://github.com/TimJDFletcher/osxphotos@<tag> osxphotos`, so osxphotos gets its own Python environment. uv clones and builds it on the first run, which takes a while. Homebrew's osxphotos formula doesn't work for this: it broke when Homebrew's `cffi` dropped Python 3.13 (`No module named '_cffi_backend'`).
 
     The default osxphotos source is a pinned tag of the author's fork, which fixes two bugs in 0.77.2 (see `docs/adr/0003-run-osxphotos-through-uvx-from-a-pinned-source.md`). `OSXPHOTOS_SOURCE` in the conf overrides it, for example with `osxphotos==0.77.2` from PyPI.
 3.  A Samba server with the macOS VFS modules enabled. In `smb.conf`:
@@ -76,7 +77,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 
 3.  Save the SMB password the Finder way. In Finder choose Go > Connect to Server, enter `smb://NAS_USER@NAS_HOSTNAME/NAS_SHARE` with your values from the conf, type the password and tick "Remember this password in my keychain". Each run checks the login keychain before mounting and ends in `no-credentials` if there is no entry, so a run never raises a password dialog.
 
-4.  Give the program that runs the script Full Disk Access, so it can read the Photos library and write to the share. Run by hand, that is your terminal app. Run by launchd, it is `/bin/bash`, which is what launchd runs the script with. In System Settings > Privacy & Security > Full Disk Access, click +, press Cmd+Shift+G, type `/bin/bash` and add it. Check this even if the export works: osxphotos can get its own access, but the script's copy of the export database runs as `/bin/bash`, and without the grant macOS refuses it. The run then exports everything and ends `db-copy-failed` with `Operation not permitted`, and because only an `ok` run touches the `last-ok` stamp, it runs again every hour.
+4.  Give your terminal app Full Disk Access, for runs by hand: System Settings > Privacy & Security > Full Disk Access. Runs by launchd don't use it: they run as an app, and macOS asks you to allow that app what it needs (see Automation). Don't add `/bin/bash` instead, because that gives Full Disk Access to anything run as a bash script.
 
 5.  Run it once by hand with `--force` (see Usage). The first run mirrors the whole library, so it takes a long time.
 
@@ -91,7 +92,7 @@ First run, or any run started by hand:
 
 What launchd runs:
 ```bash
-./osxphotos-nas-mirror.sh
+~/Applications/osxphotos-nas-mirror.app/Contents/MacOS/osxphotos-nas-mirror
 ```
 
 The script takes at most one flag:
@@ -180,12 +181,19 @@ The launchd agent starts the script on the hour, every hour (`StartCalendarInter
 The script makes that weekly. A run that ends `ok` touches `last-ok` in the app directory. Until that file is `MIRROR_INTERVAL_DAYS` x 24 hours old (default 7 days, so 168 hours), a run ends `skipped-recent`, before the preflight checks, so a costly check such as `download-speed.sh` doesn't run while the gate is shut. Once it opens, a check that skips the run is tried again each hour. With no `last-ok` the run goes ahead. Only `ok` writes it: a failed or skipped run is tried again at the next hour. A preflight check such as the dock check makes runs a no-op away from home.
 
 ```bash
+make app
 make install
 launchctl load ~/Library/LaunchAgents/io.github.timjdfletcher.osxphotos-nas-mirror.plist
 launchctl list | grep io.github.timjdfletcher.osxphotos-nas-mirror
 ```
 
-`make install` fills in the template with the path of this checkout and your home directory, and copies the result to `~/Library/LaunchAgents/`. It doesn't run `launchctl`; it prints the `load` command. Run `make install` again if you move the checkout, then `launchctl unload` and `launchctl load` the plist, because launchd keeps the copy it loaded. The plist sets `PATH` to include `/opt/homebrew/bin`, because launchd's default `PATH` doesn't reach Homebrew's `uv`. On an Intel Mac, where Homebrew lives in `/usr/local/bin`, edit the plist's `PATH`. stdout goes to `/dev/null` because the script already writes each line to the run log; stderr goes to the run log.
+The agent runs `osxphotos-nas-mirror.app`, not the script in your checkout. The app holds the script, `osxphotos.toml`, the preflight checks, and a private Python with osxphotos for Apple Silicon, so a run needs no uv or Homebrew. `network-path.sh` still needs the Xcode command line tools for `swift`. In the conf, name preflight checks by relative path, such as `preflight-checks/dock-connected.sh`, so they resolve inside the app. An absolute path into a checkout also works, but runs code outside the signed app.
+
+Be at the Mac for the first run launchd starts, and allow what macOS asks for, which is access to the Photos library and to network volumes. Without the app macOS doesn't ask: it refuses `/bin/bash` silently, and the run ends `db-copy-failed` with `Operation not permitted`, then runs again every hour because only an `ok` run touches `last-ok`.
+
+`make app` signs the app with the certificate `osxphotos-nas-mirror local signing` in your keychain, or `SIGN_IDENTITY` if set, and macOS ties the permissions to that certificate. Build every update with the same one and it keeps them; a new certificate means allowing the prompts again. To make one, create a self-signed certificate with the Code Signing extended key usage, for example in Keychain Access > Certificate Assistant. `make package` zips the app for release.
+
+To update, run `make app` and `make install`, or `make install APP=/path/to/the/unpacked.app`. `make install` copies the app to `~/Applications`, fills in the template with your home directory and copies the result to `~/Library/LaunchAgents/`. It doesn't run `launchctl`; it prints the `load` command. An update to the app needs no reload, but a changed plist does: `launchctl unload` and `launchctl load` it, because launchd keeps the copy it loaded. stdout goes to `/dev/null` because the script already writes each line to the run log; stderr goes to the run log.
 
 Neither log grows without bound (see "Logs"), so nothing needs to rotate them.
 
