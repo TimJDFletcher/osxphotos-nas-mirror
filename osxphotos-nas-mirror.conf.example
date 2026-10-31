@@ -46,7 +46,7 @@ SHARE_CHECK_INTERVAL=5
 #)
 #
 # The dock check: the run goes ahead only while this MAC address appears in
-# `ifconfig -a`. Find the dock's address there while docked.
+# `networksetup -listallhardwareports`. Find the dock's address there while docked.
 #PREFLIGHT_CHECKS=("preflight-checks/dock-connected.sh aa:bb:cc:dd:ee:ff")
 
 # --- osxphotos (optional) ---

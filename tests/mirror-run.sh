@@ -6,7 +6,7 @@
 # (for osxphotos), osascript (for notifications and mounting) and security
 # first on PATH. The test conf's PREFLIGHT_CHECKS holds stub check scripts in
 # the case's directory. The example dock check is run as a process too, with
-# a stub ifconfig. Stub behaviour is switched per case by marker files in the
+# a stub networksetup. Stub behaviour is switched per case by marker files in the
 # case's directory ($FAKE_DIR).
 #
 # Run by `make test`. With VERBOSE=1 every case prints the run's output (its run log lines).
@@ -25,7 +25,7 @@ dock_mac=aa:bb:cc:dd:ee:ff
 
 # stubs
 mkdir -p "$work/bin"
-cat > "$work/bin/ifconfig" <<STUB
+cat > "$work/bin/networksetup" <<STUB
 #!/bin/sh
 echo "en0: flags=8863<UP,BROADCAST,RUNNING>"
 echo "	ether 11:22:33:44:55:66"
@@ -504,7 +504,7 @@ check "$(outcome)" preflight-check-failed "a preflight check that is missing end
 check "$(grep -c 'Preflight check .* exited 127' "$fake/app/osxphotos-nas-mirror.log")" 1 \
     "a preflight check that is missing has bash's 127 logged"
 
-# The example dock check, run as a process with the stub ifconfig.
+# The example dock check, run as a process with the stub networksetup.
 dock_check=$root/preflight-checks/dock-connected.sh
 setup dock-check-docked
 rc=0
