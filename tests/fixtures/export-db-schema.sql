@@ -1,5 +1,5 @@
 -- The tables of osxphotos' export database that the metrics read, as
--- osxphotos/export_db.py at the pinned fork tag creates them (export_data:
+-- osxphotos/export_db.py at the pinned commit creates them (export_data:
 -- _migrate_5_0_to_6_0, then the timestamp, error and date_modified columns;
 -- history_path and history: _migrate_8_0_to_9_0 and the indexes after it).
 -- osxphotos sets journal_mode=WAL; the fixture does too.

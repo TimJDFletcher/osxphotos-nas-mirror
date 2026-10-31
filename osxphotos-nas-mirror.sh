@@ -692,7 +692,7 @@ if [ -n "${METRICS_TEXTFILE:-}" ]; then
     fi
 fi
 export_started=$SECONDS
-default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@v0.77.2-tim.3
+default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@27c2f9d68e924770ecdc6cdc902d0737f3a16fee
 if [ -z "${OSXPHOTOS_SOURCE:-}" ] && [ -x "$SCRIPT_DIR/python/bin/python3.13" ]; then
     osxphotos=("$SCRIPT_DIR/python/bin/python3.13" -B -m osxphotos)
 else

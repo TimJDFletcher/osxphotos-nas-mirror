@@ -34,7 +34,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 1.  A Mac running macOS, with Photos set to "Download Originals" or able to download them on demand (the config sets `download_missing`).
 2.  `uv` and `git`, to build the app or run from a checkout. Install uv with `brew install uv`; git comes with the Xcode command line tools. From a checkout, the script runs osxphotos through uv, as `uvx --python 3.13 --from git+https://github.com/TimJDFletcher/osxphotos@<tag> osxphotos`, so osxphotos gets its own Python environment. uv clones and builds it on the first run, which takes a while. The app has its own copy and doesn't need uv. Homebrew's osxphotos formula doesn't work for this: it broke when Homebrew's `cffi` dropped Python 3.13 (`No module named '_cffi_backend'`).
 
-    The default osxphotos source is a pinned tag of the author's fork, which fixes two bugs in 0.77.2 (see `docs/adr/0003-run-osxphotos-through-uvx-from-a-pinned-source.md`). `OSXPHOTOS_SOURCE` in the conf overrides it, for example with `osxphotos==0.77.2` from PyPI. Leave it unset for the app: a set value makes the app use `uvx` too, which launchd's `PATH` doesn't reach.
+    The default osxphotos source is a pinned commit of the author's fork, which has upstream's fixes for two bugs in 0.77.2 ahead of a release (see `docs/adr/0003-run-osxphotos-through-uvx-from-a-pinned-source.md`). `OSXPHOTOS_SOURCE` in the conf overrides it, for example with `osxphotos==0.77.2` from PyPI. Leave it unset for the app: a set value makes the app use `uvx` too, which launchd's `PATH` doesn't reach.
 3.  A Samba server with the macOS VFS modules enabled. In `smb.conf`:
     ```ini
     [global]

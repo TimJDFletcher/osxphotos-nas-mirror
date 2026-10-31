@@ -267,7 +267,7 @@ check "$(called osascript)" none "plain run posts no notification"
 check "$(cat "$fake/Volumes/photos/.osxphotos_export.db" 2>/dev/null)" "fake export db" \
     "plain run copies the export database to the share"
 want_args=$(printf '%s\n' --python 3.13 \
-    --from git+https://github.com/TimJDFletcher/osxphotos@v0.77.2-tim.3 osxphotos export --newest-first --load-config "$root/osxphotos.toml" \
+    --from git+https://github.com/TimJDFletcher/osxphotos@27c2f9d68e924770ecdc6cdc902d0737f3a16fee osxphotos export --newest-first --load-config "$root/osxphotos.toml" \
     --exportdb "$fake/app/osxphotos_export.db" "$fake/Volumes/photos")
 check "$(cat "$fake/uvx-args.log")" "$want_args" \
     "plain run exports with our fork's osxphotos, newest first, with the repo's config and the local export database, to the share"

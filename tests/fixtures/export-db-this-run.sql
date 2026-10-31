@@ -1,5 +1,5 @@
 -- What this run's export adds to export-db-earlier-run.sql, as osxphotos
--- (photoexporter.py at the pinned fork tag) writes it:
+-- (photoexporter.py at the pinned commit) writes it:
 --   a.heic: unchanged, "skip"; its export_data row is rewritten, which
 --     bumps its timestamp.
 --   b.heic: changed, rewritten, "update: DEST_SIG_DIFFERENT", new dest_size.

@@ -26,7 +26,7 @@ Every run ends through `finish`, which sends a macOS notification on a non-zero 
 - Never run the script against the real conf from a test or an experiment: the stubs would write a fake export database over the real one. Tests set `OSXPHOTOS_NAS_MIRROR_CONF`.
 - The owner runs real runs. Mounts and keychain access fail or are blocked from an agent's shell, so test with the stubs and leave real runs to the user.
 - Don't raise a password dialog (ADR 0005). The tool never saves passwords; the user does it once in Finder.
-- Quote the osxphotos fork tag (`vX.Y.Z-tim.N`) only in `osxphotos-nas-mirror.sh` and `tests/mirror-run.sh`. Renovate (`renovate.json`) bumps those two and reads only that tag scheme, so a copy elsewhere goes stale.
+- Quote the pinned osxphotos commit only in `osxphotos-nas-mirror.sh` and `tests/mirror-run.sh`. A copy elsewhere goes stale.
 
 ## What the Samba server needs
 
@@ -52,7 +52,7 @@ The ADRs hold the reasons for the big choices: the mount (0001), the export data
 - `cleanup` compares names case-insensitively, so the share must be case-insensitive to SMB clients; Samba's default `case sensitive = auto` is.
 - osxphotos runs in the background under a watchdog: every `SHARE_CHECK_INTERVAL` seconds (default 5) the share must still be mounted where the export started, and once more after the export, or osxphotos is stopped and the run ends `share-lost` without copying the database. osxphotos itself logs a failed write and exits 0, so only the watchdog catches a dropped share.
 - No unified log (`logger`, `os_log`): `logger` writes with no subsystem or category and drops its `-t` tag, a subsystem would need a compiled helper, and the unified log store on the author's Mac kept less than a day, too short for a weekly run's outcome. The run log and the export logs are plain files the script bounds itself.
-- Changes to the osxphotos pin go through Renovate or the two files named under Rules (`CONTRIBUTING.md`, "For the maintainer").
+- Changes to the osxphotos pin go through the two files named under Rules (`CONTRIBUTING.md`, "For the maintainer").
 
 ## Agent skills
 
