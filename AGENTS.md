@@ -22,6 +22,7 @@ Every run ends through `finish`, which sends a macOS notification on a non-zero 
 ## Rules
 
 - Before editing `osxphotos-nas-mirror.sh` in a checkout that a run could be using, check no run is in progress: `ps -ax | grep -E '[o]sxphotos-nas-mirror|[o]sxphotos export'`. Editing a running script corrupts that run. If one is listed, wait or tell the user.
+- launchd runs the app's copy of the script, so test a change to the script or a preflight check in the app too: macOS treats processes under the app differently (ADR 0007).
 - Never run the script against the real conf from a test or an experiment: the stubs would write a fake export database over the real one. Tests set `OSXPHOTOS_NAS_MIRROR_CONF`.
 - The owner runs real runs. Mounts and keychain access fail or are blocked from an agent's shell, so test with the stubs and leave real runs to the user.
 - Don't raise a password dialog (ADR 0005). The tool never saves passwords; the user does it once in Finder.

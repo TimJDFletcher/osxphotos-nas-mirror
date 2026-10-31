@@ -16,6 +16,10 @@ _Avoid_: Status, result code
 A user-supplied check that decides, before anything is mounted, whether a run goes ahead. There can be several: they run in order, and the first that does not pass decides.
 _Avoid_: Pre-check, location check, guard
 
+**App**:
+The signed `osxphotos-nas-mirror.app` that launchd starts. It holds the script, its config and preflight checks and a private osxphotos, and holds the macOS permissions for a run.
+_Avoid_: Wrapper, bundle
+
 **Dock check**:
 One of the example preflight checks: the run goes ahead only when a given Ethernet dock is connected.
 _Avoid_: Location check

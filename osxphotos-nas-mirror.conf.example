@@ -51,9 +51,10 @@ SHARE_CHECK_INTERVAL=5
 
 # --- osxphotos (optional) ---
 # What uvx installs osxphotos from: a PyPI pin such as osxphotos==0.77.2, or
-# git+https://...@<tag>. Unset: the script's pinned default.
+# git+https://...@<tag>. Unset: the script's pinned default, or in the app, its
+# own copy. Leave it unset for the app: launchd's PATH doesn't reach uvx.
 #OSXPHOTOS_SOURCE=""
-# The osxphotos TOML config to load. Unset: osxphotos.toml in the repo.
+# The osxphotos TOML config to load. Unset: the osxphotos.toml beside the script.
 #OSXPHOTOS_CONFIG=""
 
 # --- Run lock (optional) ---

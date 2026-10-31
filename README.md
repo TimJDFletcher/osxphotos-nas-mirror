@@ -32,9 +32,9 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 ## Prerequisites
 
 1.  A Mac running macOS, with Photos set to "Download Originals" or able to download them on demand (the config sets `download_missing`).
-2.  `uv` and `git`, to build the app or run from a checkout. Install uv with `brew install uv`; git comes with the Xcode command line tools. The script runs osxphotos through uv, as `uvx --python 3.13 --from git+https://github.com/TimJDFletcher/osxphotos@<tag> osxphotos`, so osxphotos gets its own Python environment. uv clones and builds it on the first run, which takes a while. Homebrew's osxphotos formula doesn't work for this: it broke when Homebrew's `cffi` dropped Python 3.13 (`No module named '_cffi_backend'`).
+2.  `uv` and `git`, to build the app or run from a checkout. Install uv with `brew install uv`; git comes with the Xcode command line tools. From a checkout, the script runs osxphotos through uv, as `uvx --python 3.13 --from git+https://github.com/TimJDFletcher/osxphotos@<tag> osxphotos`, so osxphotos gets its own Python environment. uv clones and builds it on the first run, which takes a while. The app has its own copy and doesn't need uv. Homebrew's osxphotos formula doesn't work for this: it broke when Homebrew's `cffi` dropped Python 3.13 (`No module named '_cffi_backend'`).
 
-    The default osxphotos source is a pinned tag of the author's fork, which fixes two bugs in 0.77.2 (see `docs/adr/0003-run-osxphotos-through-uvx-from-a-pinned-source.md`). `OSXPHOTOS_SOURCE` in the conf overrides it, for example with `osxphotos==0.77.2` from PyPI.
+    The default osxphotos source is a pinned tag of the author's fork, which fixes two bugs in 0.77.2 (see `docs/adr/0003-run-osxphotos-through-uvx-from-a-pinned-source.md`). `OSXPHOTOS_SOURCE` in the conf overrides it, for example with `osxphotos==0.77.2` from PyPI. Leave it unset for the app: a set value makes the app use `uvx` too, which launchd's `PATH` doesn't reach.
 3.  A Samba server with the macOS VFS modules enabled. In `smb.conf`:
     ```ini
     [global]
@@ -67,7 +67,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
     * `MIRROR_INTERVAL_DAYS` (optional): the least number of days between good runs (default 7). It counts whole 24-hour periods from the last good run, not calendar days: the gate opens when that run is `MIRROR_INTERVAL_DAYS` x 24 hours old, and the next hourly start after that runs. 0 runs every time the agent starts it.
     * `PREFLIGHT_CHECKS` (optional): a bash array of strings, one per check, run in order before anything is mounted. Each string is split on whitespace into a command and its arguments, so an argument can't contain a space. The first check that doesn't exit 0 decides and later ones don't run: exit 1 ends the run `skipped-preflight-check`, and any other code ends it `preflight-check-failed`. If every check exits 0 the run goes ahead. A command path containing a `/` that isn't absolute is relative to the script's directory. Unset or empty, every run goes ahead. For example, `PREFLIGHT_CHECKS=("preflight-checks/network-path.sh" "preflight-checks/download-speed.sh 50")`. For the dock check, use the MAC address of the dock's Ethernet adapter, found in `networksetup -listallhardwareports` while docked: `PREFLIGHT_CHECKS=("preflight-checks/dock-connected.sh aa:bb:cc:dd:ee:ff")`.
     * `OSXPHOTOS_SOURCE` (optional): what `uvx --from` installs osxphotos from, such as `osxphotos==0.77.2` or `git+https://...@<tag>`. Unset, the script's pinned default is used. Python stays 3.13.
-    * `OSXPHOTOS_CONFIG` (optional): the osxphotos TOML to load. Unset, the repo's `osxphotos.toml`.
+    * `OSXPHOTOS_CONFIG` (optional): the osxphotos TOML to load. Unset, the `osxphotos.toml` beside the script, which under launchd is the app's copy.
     * `LOCK_FILE` (optional): the run lock's file (see "Outcomes", `skipped-locked`). Unset, `run.lock` in the app directory. It must be an absolute path, or the run ends `usage-error`.
     * `METRICS_TEXTFILE` (optional): a Prometheus textfile for node_exporter, written at the end of every run (see "Metrics"). Unset, no metrics. It must be an absolute path; a relative one is logged as a warning and no textfile is written, and the outcome doesn't change.
 
@@ -81,7 +81,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 
 5.  Run it once by hand with `--force` (see Usage). The first run mirrors the whole library, so it takes a long time.
 
-6.  Install the launchd agent (see Automation).
+6.  Build the app and install the launchd agent (see Automation).
 
 ## Usage
 
@@ -176,7 +176,7 @@ The outcome history shows the most notable outcome in each interval on screen, a
 
 ## Automation
 
-The launchd agent starts the script on the hour, every hour (`StartCalendarInterval`, `Minute` 0), so a Mac that is home at any hour is caught. A LaunchAgent runs only while you are logged in and the Mac is awake. Hourly runs missed while it slept coalesce into one run on wake.
+The launchd agent starts the app, which runs the script, on the hour, every hour (`StartCalendarInterval`, `Minute` 0), so a Mac that is home at any hour is caught. A LaunchAgent runs only while you are logged in and the Mac is awake. Hourly runs missed while it slept coalesce into one run on wake.
 
 The script makes that weekly. A run that ends `ok` touches `last-ok` in the app directory. Until that file is `MIRROR_INTERVAL_DAYS` x 24 hours old (default 7 days, so 168 hours), a run ends `skipped-recent`, before the preflight checks, so a costly check such as `download-speed.sh` doesn't run while the gate is shut. Once it opens, a check that skips the run is tried again each hour. With no `last-ok` the run goes ahead. Only `ok` writes it: a failed or skipped run is tried again at the next hour. A preflight check such as the dock check makes runs a no-op away from home.
 
@@ -189,7 +189,7 @@ launchctl list | grep io.github.timjdfletcher.osxphotos-nas-mirror
 
 The agent runs `osxphotos-nas-mirror.app`, not the script in your checkout. The app holds the script, `osxphotos.toml`, the preflight checks, and a private Python with osxphotos for Apple Silicon, so a run needs no uv or Homebrew. `network-path.sh` still needs the Xcode command line tools for `swift`. In the conf, name preflight checks by relative path, such as `preflight-checks/dock-connected.sh`, so they resolve inside the app. An absolute path into a checkout also works, but runs code outside the signed app.
 
-Be at the Mac for the first run launchd starts, and allow what macOS asks for, which is access to the Photos library and to network volumes. Without the app macOS doesn't ask: it refuses `/bin/bash` silently, and the run ends `db-copy-failed` with `Operation not permitted`, then runs again every hour because only an `ok` run touches `last-ok`.
+Be at the Mac for the app's first run, and allow what macOS asks for, which is access to the Photos library and to network volumes. To get that over with, open the app from `~/Applications`: it does a normal run, gate and preflight checks included, with no window. Without the app macOS doesn't ask: it refuses `/bin/bash` silently, and the run ends `db-copy-failed` with `Operation not permitted`, then runs again every hour because only an `ok` run touches `last-ok`.
 
 `make app` signs the app with the certificate `osxphotos-nas-mirror local signing` in your keychain, or `SIGN_IDENTITY` if set, and macOS ties the permissions to that certificate. Build every update with the same one and it keeps them; a new certificate means allowing the prompts again. To make one, create a self-signed certificate with the Code Signing extended key usage, for example in Keychain Access > Certificate Assistant. `make package` zips the app for release.
 

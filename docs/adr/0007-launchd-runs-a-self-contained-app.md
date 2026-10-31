@@ -10,6 +10,8 @@ It is signed with a self-signed certificate, not ad hoc. An ad hoc identity is t
 
 Python runs with `-B`, because a `.pyc` written into the bundle would break the signature's seal.
 
+Under the app, macOS shows `ifconfig` every MAC address as `02:00:00:00:00:00`, so the dock check uses `networksetup`, which shows the real one. Plain bash under launchd saw the real address, so this only appeared in the app.
+
 A checkout still runs by hand through uvx, which is what the tests stub and where the pin lives. `make app` reads the pin from the script.
 
 These prompts don't conflict with ADR 0005: they come from macOS, once per certificate, and that ADR rules out a password dialog that could come on any run.
