@@ -662,11 +662,11 @@ log "Export log: $export_log"
 # known version: Homebrew's formula broke when Homebrew's cffi dropped
 # Python 3.13, and a mirror shouldn't upgrade its exporter between runs.
 # OSXPHOTOS_SOURCE in the conf is what uvx installs it from, a PyPI pin
-# (osxphotos==0.77.2) or a git+https://…@<tag>. Unset, it is the default
-# here: a tag on our fork, which fixes two bugs that make 0.77.2 download
-# evicted RAW+JPEG pairs and edited Live Photos again on every run (upstream PRs
-# RhetTbull/osxphotos#2265 and #2266); it goes back to a PyPI pin once
-# upstream releases the fixes.
+# (osxphotos==0.77.2) or a git+https://…@<ref>. Unset, it is the default
+# here: a commit on our fork's main, a copy of upstream's, which has the fixes
+# for two bugs that make 0.77.2 download evicted RAW+JPEG pairs and edited Live
+# Photos again on every run (upstream PRs RhetTbull/osxphotos#2265 and #2266);
+# it goes back to a PyPI pin once upstream releases the fixes.
 # OSXPHOTOS_CONFIG in the conf is the osxphotos TOML; unset, the repo's.
 # In the app, a Python with that pin is beside the script, and it runs that
 # unless the conf names a source. -B: a .pyc would break the app's signature.
