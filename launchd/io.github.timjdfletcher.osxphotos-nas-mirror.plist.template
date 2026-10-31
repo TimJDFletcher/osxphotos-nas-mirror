@@ -1,23 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- A template: make install fills in @REPO@ (this checkout) and @HOME@ (the
-     home directory) and installs the result in ~/Library/LaunchAgents. -->
+<!-- A template: make install fills in @HOME@ (the home directory) and installs
+     the result in ~/Library/LaunchAgents. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>io.github.timjdfletcher.osxphotos-nas-mirror</string>
 
+    <!-- The app, not the script, so the run has the app's permissions (ADR 0007). -->
     <key>ProgramArguments</key>
     <array>
-        <string>@REPO@/osxphotos-nas-mirror.sh</string>
+        <string>@HOME@/Applications/osxphotos-nas-mirror.app/Contents/MacOS/osxphotos-nas-mirror</string>
     </array>
-
-    <!-- launchd's default PATH has no /opt/homebrew/bin, where uv is. -->
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    </dict>
 
     <!-- The script already writes every stdout line to the run log itself, so
          stdout is dropped here; only stderr (errors from cp, the mount,
