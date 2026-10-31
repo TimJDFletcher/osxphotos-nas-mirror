@@ -9,6 +9,8 @@
     <string>osxphotos-nas-mirror</string>
     <key>CFBundleExecutable</key>
     <string>osxphotos-nas-mirror</string>
+    <key>CFBundleIconFile</key>
+    <string>icon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>

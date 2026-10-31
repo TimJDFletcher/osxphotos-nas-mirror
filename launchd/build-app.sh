@@ -25,7 +25,16 @@ cp "$root/osxphotos-nas-mirror.sh" "$root/osxphotos.toml" "$resources/"
 cp -R "$root/preflight-checks" "$resources/preflight-checks"
 
 python_home=$(mktemp -d)
-trap 'rm -rf "$python_home"' EXIT
+iconset=$(mktemp -d)/icon.iconset
+trap 'rm -rf "$python_home" "$(dirname "$iconset")"' EXIT
+mkdir "$iconset"
+for size in 16 32 128 256 512; do
+    sips -z "$size" "$size" "$root/launchd/icon.png" --out "$iconset/icon_${size}x${size}.png" > /dev/null
+    double=$((size * 2))
+    sips -z "$double" "$double" "$root/launchd/icon.png" --out "$iconset/icon_${size}x${size}@2x.png" > /dev/null
+done
+iconutil -c icns -o "$resources/icon.icns" "$iconset"
+
 UV_PYTHON_INSTALL_DIR=$python_home uv python install --quiet 3.13
 # -type d: uv also leaves a symlink beside it.
 cp -R "$(find "$python_home" -maxdepth 1 -type d -name 'cpython-3.13*')" "$resources/python"

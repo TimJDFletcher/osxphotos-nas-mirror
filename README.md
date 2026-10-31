@@ -27,7 +27,7 @@ The share holds a mirror of the library, not a backup on its own. A backup also 
 | `examples/osxphotos-exif.toml` | An alternative config that also writes metadata with exiftool, XMP sidecars and Finder tags. The script doesn't use it; point `OSXPHOTOS_CONFIG` at a copy to use it. |
 | `examples/grafana-dashboard.json` | An example Grafana dashboard for the metrics (see "Example dashboard"). |
 | `launchd/io.github.timjdfletcher.osxphotos-nas-mirror.plist.template` | The launchd agent that runs the app, with a `@HOME@` placeholder that `make install` fills in. |
-| `launchd/build-app.sh`, `launchd/runner.c`, `launchd/Info.plist` | What `make app` builds the app from (see Automation). |
+| `launchd/build-app.sh`, `launchd/runner.c`, `launchd/Info.plist`, `launchd/icon.png` | What `make app` builds the app from (see Automation). |
 
 ## Prerequisites
 
