@@ -253,4 +253,4 @@ GPL-3.0-or-later. Copyright (C) 2026 Tim Fletcher. See `LICENSE`.
 
 ## Issues
 
-The backlog is on GitHub: [TimJDFletcher/osxphotos-nas-mirror issues](https://github.com/TimJDFletcher/osxphotos-nas-mirror/issues).
+The backlog is on GitHub: [TimJDFletcher/osxphotos-nas-mirror issues](https://github.com/TimJDFletcher/osxphotos-nas-mirror/issues). `make lint` also fails unless the rows of the Outcomes table match `OUTCOMES` in names and exit codes (`tests/readme-outcomes.sh`).

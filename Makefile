@@ -20,9 +20,10 @@ test: lint ## shellcheck, plutil and jq, then the fixture tests for osxphotos-na
 	tests/preflight-checks.sh
 	tests/install.sh
 
-lint: ## shellcheck the scripts, plutil the launchd agent (a filled-in copy of the template), jq the example dashboard
+lint: ## shellcheck the scripts, plutil the launchd agent (a filled-in copy of the template), jq the example dashboard, check the README's outcomes table
 	shellcheck -x osxphotos-nas-mirror.sh launchd/build-app.sh tests/*.sh preflight-checks/*.sh
 	tests/grafana-dashboard.sh
+	tests/readme-outcomes.sh
 	@tmp=$$(mktemp) && \
 	$(FILL) > "$$tmp" && \
 	plutil -lint "$$tmp"; rc=$$?; rm -f "$$tmp"; exit $$rc
