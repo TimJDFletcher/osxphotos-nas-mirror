@@ -16,6 +16,9 @@ set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 script=$root/osxphotos-nas-mirror.sh
+# The script's limits, read from it so there is no second copy to keep in step.
+run_log_lines=$(sed -n 's/^RUN_LOG_LINES=//p' "$script")
+export_logs_kept=$(sed -n 's/^EXPORT_LOGS_KEPT=//p' "$script")
 work=$(mktemp -d)
 trap 'chmod -R u+w "$work"; rm -rf "$work"' EXIT
 failures=0
@@ -165,21 +168,26 @@ SHARE_CHECK_INTERVAL=1
 CONF
 }
 
-# run [ARGS...]: run the script for the current case. Sets $rc and $log.
-# HOME points into the case too, so a script that ignored the conf override
-# and read the real conf would still write nowhere real. With
+# invoke COMMAND [ARGS...]: exec COMMAND in the current case's environment,
+# the one place that spells it out, so call it in a subshell or in the
+# background. HOME points into the case, so a script that ignored the conf
+# override and read the real conf would still write nowhere real. With
 # conf_override=none the override is left unset, so the script reads its
 # default conf, under the case's HOME.
-run() {
-    rc=0
+invoke() {
     mkdir -p "$fake/home"
     if [ "${conf_override:-}" = none ]; then
-        set -- env -u OSXPHOTOS_NAS_MIRROR_CONF "$script" "$@"
+        set -- env -u OSXPHOTOS_NAS_MIRROR_CONF "$@"
     else
-        set -- env OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" "$script" "$@"
+        set -- env OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" "$@"
     fi
-    env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" \
-        "$@" > "$fake/stdout" 2> "$fake/stderr" || rc=$?
+    exec env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" "$@"
+}
+
+# run [ARGS...]: run the script for the current case. Sets $rc and $log.
+run() {
+    rc=0
+    (invoke "$script" "$@") > "$fake/stdout" 2> "$fake/stderr" || rc=$?
     log=$(cat "$fake/app/osxphotos-nas-mirror.log" 2>/dev/null || true)
     if [ -n "${VERBOSE:-}" ]; then
         echo "--- $fake"; cat "$fake/stdout" "$fake/stderr"
@@ -187,13 +195,10 @@ run() {
 }
 
 # start_run: start the script for the current case in the
-# background, as run does. Sets $run_pid (env execs the script, so it is the
-# script's own pid).
+# background, as run does. Sets $run_pid (invoke execs the script, so it is
+# the script's own pid).
 start_run() {
-    mkdir -p "$fake/home"
-    env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" \
-        OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" \
-        "$script" > "$fake/stdout" 2> "$fake/stderr" &
+    invoke "$script" > "$fake/stdout" 2> "$fake/stderr" &
     run_pid=$!
 }
 
@@ -284,9 +289,7 @@ printf '%s\n' "\$@" > "$fake/python-args.log"
 PYTHON
 chmod +x "$fake/app-resources/python/bin/python3.13"
 rc=0
-mkdir -p "$fake/home"
-env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" \
-    "$fake/app-resources/osxphotos-nas-mirror.sh" > "$fake/stdout" 2> "$fake/stderr" || rc=$?
+(invoke "$fake/app-resources/osxphotos-nas-mirror.sh") > "$fake/stdout" 2> "$fake/stderr" || rc=$?
 check "$(sed -n 1,4p "$fake/python-args.log" 2>/dev/null | tr '\n' ' ')" "-B -m osxphotos export " \
     "in the app, the export runs on the bundled Python and writes no .pyc"
 check "$(called uvx)" none "in the app, uvx isn't used"
@@ -295,12 +298,9 @@ check "$(called uvx)" none "in the app, uvx isn't used"
 # its own directory, where osxphotos.toml is.
 setup relative-invocation
 rc=0
-mkdir -p "$fake/home"
 (
-    cd "$root/.." && env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" \
-        OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" \
-        bash "$(basename "$root")/osxphotos-nas-mirror.sh" > "$fake/stdout" 2> "$fake/stderr"
-) || rc=$?
+    cd "$root/.." && invoke bash "$(basename "$root")/osxphotos-nas-mirror.sh"
+) > "$fake/stdout" 2> "$fake/stderr" || rc=$?
 log=$(cat "$fake/app/osxphotos-nas-mirror.log" 2> /dev/null || true)
 check "$(outcome)" ok "a run started by a relative path from another directory ends with an outcome"
 check "$(sed -n '/^--load-config$/{n;p;}' "$fake/uvx-args.log")" "$root/osxphotos.toml" \
@@ -309,12 +309,9 @@ check "$(sed -n '/^--load-config$/{n;p;}' "$fake/uvx-args.log")" "$root/osxphoto
 # A bare $0 (no "/"): dirname gives ".".
 setup bare-invocation
 rc=0
-mkdir -p "$fake/home"
 (
-    cd "$root" && env HOME="$fake/home" PATH="$work/bin:$PATH" FAKE_DIR="$fake" \
-        OSXPHOTOS_NAS_MIRROR_CONF="$fake/test.conf" \
-        bash osxphotos-nas-mirror.sh > "$fake/stdout" 2> "$fake/stderr"
-) || rc=$?
+    cd "$root" && invoke bash osxphotos-nas-mirror.sh
+) > "$fake/stdout" 2> "$fake/stderr" || rc=$?
 log=$(cat "$fake/app/osxphotos-nas-mirror.log" 2> /dev/null || true)
 check "$(outcome)" ok "a run started by a bare script name ends with an outcome"
 check "$(sed -n '/^--load-config$/{n;p;}' "$fake/uvx-args.log")" "$root/osxphotos.toml" \
@@ -705,11 +702,12 @@ old_run_log() {
     seq 1 "$1" | sed 's/^/old line /' > "$fake/app/osxphotos-nas-mirror.log"
 }
 
-# old_export_logs: nine export logs from earlier runs, a day apart.
+# old_export_logs: one more export log than is kept, from earlier runs, a day
+# apart (2020-01-01 on).
 old_export_logs() {
     mkdir -p "$fake/app/exports"
-    for d in 1 2 3 4 5 6 7 8 9; do
-        echo "an earlier export" > "$fake/app/exports/2020-01-0${d}T00-00-00.log"
+    for d in $(seq 1 $((export_logs_kept + 1))); do
+        echo "an earlier export" > "$fake/app/exports/$(printf '2020-01-%02dT00-00-00' "$d").log"
     done
 }
 
@@ -776,9 +774,11 @@ check "$(grep -c 'Cannot create .*/exports for the export log' "$fake/app/osxpho
 setup logs-pruned
 old_export_logs
 run
-check "$(export_logs | wc -l | tr -d ' ')" 8 "with 9 export logs, a run that exports leaves 8"
-check "$(export_logs | head -n 7)" "$(for d in 3 4 5 6 7 8 9; do echo "2020-01-0${d}T00-00-00.log"; done)" \
-    "a run that exports keeps the 7 newest earlier export logs"
+check "$(export_logs | wc -l | tr -d ' ')" "$export_logs_kept" \
+    "with $((export_logs_kept + 1)) export logs, a run that exports leaves $export_logs_kept"
+check "$(export_logs | head -n $((export_logs_kept - 1)))" \
+    "$(for d in $(seq 3 $((export_logs_kept + 1))); do printf '2020-01-%02dT00-00-00.log\n' "$d"; done)" \
+    "a run that exports keeps the $((export_logs_kept - 1)) newest earlier export logs"
 check "$(export_logs | tail -n 1)" "$(basename "$(named_export_log)")" \
     "a run that exports keeps its own export log"
 
@@ -787,38 +787,39 @@ old_export_logs
 touch "$fake/app/last-ok"
 run
 check "$(outcome)" skipped-recent "a run with a fresh stamp ends skipped-recent"
-check "$(export_logs | wc -l | tr -d ' ')" 9 "a skipped-recent run neither writes nor deletes export logs"
+check "$(export_logs | wc -l | tr -d ' ')" $((export_logs_kept + 1)) "a skipped-recent run neither writes nor deletes export logs"
 
 setup logs-skipped-preflight-check
 old_export_logs
 echo 1 > "$fake/preflight-check-exit"
 run
-check "$(export_logs | wc -l | tr -d ' ')" 9 "a skipped-preflight-check run neither writes nor deletes export logs"
+check "$(export_logs | wc -l | tr -d ' ')" $((export_logs_kept + 1)) "a skipped-preflight-check run neither writes nor deletes export logs"
 
 setup run-log-trimmed
-old_run_log 10050
+old_run_log $((run_log_lines + 50))
 run
 run_log=$fake/app/osxphotos-nas-mirror.log
 old=$(grep -c '^old line ' "$run_log" || true)
-check "$(wc -l < "$run_log" | tr -d ' ')" 10000 "a run log longer than 10,000 lines is trimmed to 10,000"
+check "$(wc -l < "$run_log" | tr -d ' ')" "$run_log_lines" \
+    "a run log longer than $run_log_lines lines is trimmed to $run_log_lines"
 check "$(outcome)" ok "the trimmed run log ends with the outcome"
-check "$(head -n 1 "$run_log")" "old line $((10051 - old))" \
-    "the trimmed run log starts where its last 10,000 lines start"
-check "$(grep -n '^old line 10050$' "$run_log" | cut -d: -f1)" "$old" \
+check "$(head -n 1 "$run_log")" "old line $((run_log_lines + 51 - old))" \
+    "the trimmed run log starts where its last $run_log_lines lines start"
+check "$(grep -n "^old line $((run_log_lines + 50))\$" "$run_log" | cut -d: -f1)" "$old" \
     "the trimmed run log keeps the earlier lines in one piece, before this run's"
 
 setup run-log-short
 old_run_log 20
 run
 check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
-    "a run log under 10,000 lines is not trimmed"
+    "a run log under $run_log_lines lines is not trimmed"
 check "$(grep -c '^old line ' "$fake/app/osxphotos-nas-mirror.log")" 20 \
-    "a run log under 10,000 lines keeps every earlier line"
+    "a run log under $run_log_lines lines keeps every earlier line"
 
 # The run holding the lock may be writing to the run log, so a run that finds
 # the lock held leaves it alone; the holder trims it when it ends.
 setup run-log-locked
-old_run_log 10050
+old_run_log $((run_log_lines + 50))
 hold_lock "$fake/run.lock"
 run
 kill "$holder" 2> /dev/null || true
@@ -830,7 +831,7 @@ check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
 # A skipped run trims too. Here the app directory is read-only, so the trim
 # can't write its new file.
 setup run-log-trim-fails
-old_run_log 10050
+old_run_log $((run_log_lines + 50))
 touch "$fake/app/last-ok"
 chmod a-w "$fake/app"
 run
