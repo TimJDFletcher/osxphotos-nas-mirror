@@ -100,8 +100,11 @@ fi
 [ ! -e "$FAKE_DIR/share-drops-at-end" ] || : > "$FAKE_DIR/mounts"
 # no-summary: an export that ends without its summary.
 [ ! -e "$FAKE_DIR/no-summary" ] || exit 0
-echo "Processed: 3 photos, exported: 1, updated: 1, skipped: 1, updated EXIF data: 0, missing: 0, error: 0, touched date: 2"
+# summary-exported: the summary's exported count (default 1).
+echo "Processed: 3 photos, exported: $(cat "$FAKE_DIR/summary-exported" 2> /dev/null || echo 1), updated: 1, skipped: 1, updated EXIF data: 0, missing: 0, error: 0, touched date: 2"
 echo "Elapsed time: 0:00:01"
+# no-cleanup: a summary with no cleanup lines after it.
+[ ! -e "$FAKE_DIR/no-cleanup" ] || exit 0
 echo "Cleaning up $dest"
 echo "Deleting $dest/2026/10/17/IMG_0000.HEIC"
 echo "Deleted: 1 file, 0 directories"
@@ -1050,6 +1053,55 @@ for name in last_export_duration_seconds last_export_files mirror_files mirror_b
         "a failed run keeps the last ok run's $name"
 done
 check "$(textfile_dir)" osxphotos_nas_mirror.prom "carrying metrics over leaves no temp file behind"
+
+# An ok run, then an export whose summary has no Deleted: line. The summary's
+# other metrics are this run's, and the one it lacks is dropped, not carried.
+setup metrics-no-deleted-line
+with_metrics
+with_export_db
+run
+check "$(metric last_export_deleted_files)" 1 "an ok run writes last_export_deleted_files"
+: > "$fake/no-cleanup"
+echo 2 > "$fake/summary-exported"
+run --force
+check "$(outcome)" ok "an export with no Deleted: line ends ok"
+check "$(metric last_export_files '{result="exported"}')" 2 \
+    "an export with no Deleted: line still writes its summary's counts"
+check "$(metric_lines last_export_deleted_files)" "" \
+    "an export with no Deleted: line drops last_export_deleted_files, not carrying it over"
+check "$(prom_format)" valid "a textfile with no last_export_deleted_files is in Prometheus text format"
+
+# An ok run, then an export that prints no summary: its metrics are stale, so
+# all of them are carried over, and the run's own duration is this run's.
+setup metrics-no-summary
+with_metrics
+with_export_db
+run
+cp "$prom" "$fake/after-ok.prom" 2> /dev/null || : > "$fake/after-ok.prom"
+: > "$fake/no-summary"
+run --force
+check "$(outcome)" ok "an export with no summary ends ok"
+for name in last_export_timestamp_seconds last_export_duration_seconds last_export_photos \
+    last_export_files last_export_deleted_files; do
+    check "$(metric_lines "$name")" "$(ok_metric_lines "$name")" \
+        "an export with no summary keeps the last summary's $name"
+done
+
+# An ok run, then an ok run whose mirror can't be read: the metrics keep the
+# last ok run's, as the warning says.
+setup metrics-mirror-unread
+with_metrics
+with_export_db
+run
+cp "$prom" "$fake/after-ok.prom" 2> /dev/null || : > "$fake/after-ok.prom"
+rm "$fake/export-db-this-run.sql"
+run --force
+check "$(grep -c 'WARNING: Could not read the mirror' "$fake/app/osxphotos-nas-mirror.log")" 1 \
+    "a mirror that cannot be read after an earlier ok run is logged as a warning"
+for name in mirror_files mirror_bytes last_export_bytes; do
+    check "$(metric_lines "$name")" "$(ok_metric_lines "$name")" \
+        "a run that cannot read the mirror keeps the last ok run's $name"
+done
 
 setup metrics-unset
 run
