@@ -239,6 +239,8 @@ make test    # shellcheck, plutil and jq, then the fixture tests and the make in
 
 `make lint` checks the example dashboard with jq (`tests/grafana-dashboard.sh`): it must parse, have no uid of its own, take its data source and Macs from the `datasource` and `instance` variables, and hard-code neither. It must also query only metrics the script writes, and its outcome codes must cover exactly the outcomes in `OUTCOMES`; the check reads both from `osxphotos-nas-mirror.sh`.
 
+`make lint` also fails unless the rows of the Outcomes table match `OUTCOMES` in names and exit codes (`tests/readme-outcomes.sh`).
+
 `tests/mirror-run.sh` runs `osxphotos-nas-mirror.sh` as a process against a test conf (`OSXPHOTOS_NAS_MIRROR_CONF`) and stub `mount`, `uvx`, `osascript` and `security` on `PATH` (`osascript` stands in for both notifications and the mount), and stub preflight check scripts for each exit path and for several checks in a row, so no test touches the dock, the share or the Photos library. The example dock check is run as a process too, with a stub `networksetup`. The metrics cases build an export database with `sqlite3` from the schema in `tests/fixtures/`, and check the textfile with `promtool check metrics` when it is on `PATH`, otherwise with a format check of their own. `tests/install.sh` runs `make install` with `HOME` set to a temporary directory and checks the plist it writes.
 
 ## Behaviour to know about
@@ -253,4 +255,4 @@ GPL-3.0-or-later. Copyright (C) 2026 Tim Fletcher. See `LICENSE`.
 
 ## Issues
 
-The backlog is on GitHub: [TimJDFletcher/osxphotos-nas-mirror issues](https://github.com/TimJDFletcher/osxphotos-nas-mirror/issues). `make lint` also fails unless the rows of the Outcomes table match `OUTCOMES` in names and exit codes (`tests/readme-outcomes.sh`).
+The backlog is on GitHub: [TimJDFletcher/osxphotos-nas-mirror issues](https://github.com/TimJDFletcher/osxphotos-nas-mirror/issues).
