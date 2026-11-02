@@ -166,7 +166,7 @@ export_db_read() {
 # history, which gains a row per file every run.
 mirror_from_export_db() {
     local result
-    case "${history_mark:-}" in
+    case "$history_mark" in
         '' | *[!0-9]*) return 1 ;;
     esac
     export_db_read result "
@@ -206,20 +206,22 @@ mark_export_for_metrics() {
 
 # read_mirror_for_metrics: if METRICS_TEXTFILE is set, after an ok export read
 # the mirror's files and size from the export database. A read that fails is
-# a warning. This runs in the main shell, not in metrics_text, whose command
-# substitution would lose the values and the warning's place in the run log.
+# a warning. It runs in the main shell because what metrics_text sets, in its
+# command substitution, is lost.
 read_mirror_for_metrics() {
     [ -n "${METRICS_TEXTFILE:-}" ] || return 0
-    mirror_from_export_db ||
+    if ! mirror_from_export_db; then
         log "WARNING: Could not read the mirror's files and size from the export database $OSXPHOTOS_EXPORT_DB (${export_db_error:-no history mark from before the export}); the metrics keep the last ok run's."
+    fi
 }
 
-# gauge NAME HELP VALUE [LABELS]: a gauge's HELP and TYPE lines and one
-# sample. Prints nothing if VALUE is empty.
+# gauge NAME HELP SAMPLES: a gauge's HELP and TYPE lines and its samples.
+# SAMPLES is a value or, for a labelled metric, lines of {LABELS} VALUE.
+# Prints nothing if SAMPLES is empty.
 gauge() {
     [ -n "$3" ] || return 0
-    printf '# HELP %s%s %s\n# TYPE %s%s gauge\n%s%s%s %s\n' \
-        "$METRICS_PREFIX" "$1" "$2" "$METRICS_PREFIX" "$1" "$METRICS_PREFIX" "$1" "${4:-}" "$3"
+    printf '# HELP %s%s %s\n# TYPE %s%s gauge\n' "$METRICS_PREFIX" "$1" "$2" "$METRICS_PREFIX" "$1"
+    printf '%s\n' "$3" | sed -e 's/^[^{]/ &/' -e "s/^/$METRICS_PREFIX$1/"
 }
 
 # carry NAME: metric NAME's lines from the textfile as it is, written by an
@@ -238,78 +240,85 @@ carry() {
     printf '%s\n' "$lines"
 }
 
+# fresh_gauge FRESH NAME HELP SAMPLES: gauge NAME if FRESH isn't empty, as this
+# run has its group of metrics, else carry NAME. A fresh metric with no SAMPLES
+# is dropped, not carried: its group is this run's, and this run lacks it.
+fresh_gauge() {
+    if [ -n "$1" ]; then
+        gauge "$2" "$3" "$4"
+    else
+        carry "$2"
+    fi
+}
+
 # summary_count PATTERN: the number sed PATTERN (with \(N\) for it) finds in
 # this run's export summary, from export_summary. Empty if none.
 summary_count() {
-    printf '%s\n' "${export_summary_text:-}" | sed -n "s/$1/\\1/p" | head -n 1
+    printf '%s\n' "$export_summary_text" | sed -n "s/$1/\\1/p" | head -n 1
 }
 
-# metrics_text OUTCOME: the textfile for a run that ended OUTCOME. Each
-# metric is this run's value where this run has one; otherwise its lines are
-# carried over from the textfile an earlier run wrote:
-# - the run's time and outcome, the last-ok stamp and the export database's
-#   size: every run.
-# - the run's duration: every run but a skipped one.
-# - the export's time, duration and osxphotos' summary counts: a run whose
-#   export printed its summary.
-# - the mirror's files and bytes and the bytes written: an ok run (see
-#   mirror_from_export_db).
-metrics_text() {
-    local entry name value result files
-    gauge last_run_timestamp_seconds "When the last run ended, in seconds since the epoch." "$(date +%s)"
-    printf '# HELP %slast_run_outcome %s\n# TYPE %slast_run_outcome gauge\n' "$METRICS_PREFIX" \
-        "The last run's outcome: 1 for the outcome it ended with, 0 for every other." "$METRICS_PREFIX"
+# outcome_samples OUTCOME: 1 for OUTCOME and 0 for every other, by outcome.
+outcome_samples() {
+    local entry name value
     for entry in $OUTCOMES; do
         name=${entry%%:*}
         value=0
         [ "$name" != "$1" ] || value=1
-        printf '%slast_run_outcome{outcome="%s"} %s\n' "$METRICS_PREFIX" "$name" "$value"
+        printf '{outcome="%s"} %s\n' "$name" "$value"
     done
+}
+
+# export_files_samples: the summary's file counts, by what osxphotos did.
+export_files_samples() {
+    local result value
+    for result in exported updated skipped missing error; do
+        value=$(summary_count ".*, $result: \\([0-9][0-9]*\\).*")
+        [ -z "$value" ] || printf '{result="%s"} %s\n' "$result" "$value"
+    done
+}
+
+# metrics_text OUTCOME: the textfile for a run that ended OUTCOME, one call
+# for each metric, in the textfile's order. A gauge is this run's on every
+# run. A fresh_gauge's first argument says when it is this run's, and on other
+# runs it is carried over from the textfile an earlier run wrote.
+#
+# The run facts it reads, empty until the run gets that far:
+# - STAMP: the main block, once the conf has loaded. It and the conf's
+#   OSXPHOTOS_EXPORT_DB keep their guards: finish can come before that.
+# - export_started: the main block, as the export starts.
+# - export_ended, export_ended_at, export_summary_text: log_export_summary,
+#   when the export ends. The last only if the export printed its summary.
+# - mirror_files, mirror_bytes, export_bytes: mirror_from_export_db, through
+#   read_mirror_for_metrics, on an ok run.
+metrics_text() {
+    local ran=yes summarised="$export_summary_text" mirror_read="$mirror_files"
+    case "$1" in
+        skipped-*) ran= ;;
+    esac
+    gauge last_run_timestamp_seconds "When the last run ended, in seconds since the epoch." "$(date +%s)"
+    gauge last_run_outcome "The last run's outcome: 1 for the outcome it ended with, 0 for every other." \
+        "$(outcome_samples "$1")"
     if [ -e "${STAMP:-}" ]; then
         gauge last_ok_timestamp_seconds "When the last ok run ended (the last-ok stamp's mtime), in seconds since the epoch." \
             "$(stat -f %m "$STAMP")"
     fi
-    case "$1" in
-        skipped-*) carry last_run_duration_seconds ;;
-        *) gauge last_run_duration_seconds "How long the last run that wasn't skipped took, in seconds." "$SECONDS" ;;
-    esac
-    if [ -n "${export_summary_text:-}" ]; then
-        gauge last_export_timestamp_seconds "When the last export that printed its summary ended, in seconds since the epoch." \
-            "$export_ended_at"
-        gauge last_export_duration_seconds "How long the last export that printed its summary took, in seconds." \
-            "$((export_ended - export_started))"
-        gauge last_export_photos "Photos the last export processed, from osxphotos' summary." \
-            "$(summary_count '.*Processed: \([0-9][0-9]*\) photo.*')"
-        files=
-        for result in exported updated skipped missing error; do
-            value=$(summary_count ".*, $result: \\([0-9][0-9]*\\).*")
-            [ -z "$value" ] || files="$files${METRICS_PREFIX}last_export_files{result=\"$result\"} $value
-"
-        done
-        if [ -n "$files" ]; then
-            printf '# HELP %slast_export_files %s\n# TYPE %slast_export_files gauge\n%s' "$METRICS_PREFIX" \
-                "Files in the last export, by what osxphotos did with them, from its summary." "$METRICS_PREFIX" "$files"
-        fi
-        gauge last_export_deleted_files "Files the last export's cleanup deleted from the share." \
-            "$(summary_count '.*Deleted: \([0-9][0-9]*\) file.*')"
-    else
-        for name in last_export_timestamp_seconds last_export_duration_seconds last_export_photos \
-            last_export_files last_export_deleted_files; do
-            carry "$name"
-        done
-    fi
+    fresh_gauge "$ran" last_run_duration_seconds "How long the last run that wasn't skipped took, in seconds." "$SECONDS"
+    fresh_gauge "$summarised" last_export_timestamp_seconds "When the last export that printed its summary ended, in seconds since the epoch." \
+        "$export_ended_at"
+    fresh_gauge "$summarised" last_export_duration_seconds "How long the last export that printed its summary took, in seconds." \
+        "$((export_ended - export_started))"
+    fresh_gauge "$summarised" last_export_photos "Photos the last export processed, from osxphotos' summary." \
+        "$(summary_count '.*Processed: \([0-9][0-9]*\) photo.*')"
+    fresh_gauge "$summarised" last_export_files "Files in the last export, by what osxphotos did with them, from its summary." \
+        "$(export_files_samples)"
+    fresh_gauge "$summarised" last_export_deleted_files "Files the last export's cleanup deleted from the share." \
+        "$(summary_count '.*Deleted: \([0-9][0-9]*\) file.*')"
     if [ -f "${OSXPHOTOS_EXPORT_DB:-}" ]; then
         gauge export_db_bytes "The export database's size, in bytes." "$(stat -f %z "$OSXPHOTOS_EXPORT_DB")"
     fi
-    if [ -n "${mirror_files:-}" ]; then
-        gauge mirror_files "Files on the share as of the last ok run: those its export wrote or found up to date." "$mirror_files"
-        gauge mirror_bytes "The size of the files in mirror_files, as osxphotos last wrote them, in bytes." "$mirror_bytes"
-        gauge last_export_bytes "Bytes the last ok run's export wrote: new and updated files." "$export_bytes"
-    else
-        for name in mirror_files mirror_bytes last_export_bytes; do
-            carry "$name"
-        done
-    fi
+    fresh_gauge "$mirror_read" mirror_files "Files on the share as of the last ok run: those its export wrote or found up to date." "$mirror_files"
+    fresh_gauge "$mirror_read" mirror_bytes "The size of the files in mirror_files, as osxphotos last wrote them, in bytes." "$mirror_bytes"
+    fresh_gauge "$mirror_read" last_export_bytes "Bytes the last ok run's export wrote: new and updated files." "$export_bytes"
 }
 
 # write_metrics OUTCOME: if METRICS_TEXTFILE is set, write it for a run that

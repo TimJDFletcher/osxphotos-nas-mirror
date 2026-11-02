@@ -4,7 +4,7 @@
 # itself so there is no third copy to keep in step:
 # - the outcomes: the names in OUTCOMES.
 # - the metric names: METRICS_PREFIX and each name the textfile writer
-#   (metrics_text) passes to gauge or prints after the prefix.
+#   (metrics_text) passes to gauge or fresh_gauge.
 set -eu
 cd "$(dirname "$0")/.."
 script=osxphotos-nas-mirror.sh
@@ -12,11 +12,9 @@ dashboard=examples/grafana-dashboard.json
 
 outcomes=$(tests/outcomes.sh | cut -d ' ' -f 1 | tr '\n' ' ')
 prefix=$(sed -n 's/^METRICS_PREFIX=\([a-z_]*\)$/\1/p' "$script")
-# shellcheck disable=SC2016 # ${METRICS_PREFIX} is text to match, not to expand.
 metrics=$(sed -n '/^metrics_text() {/,/^}/p' "$script" |
-    sed -n -e 's/.* gauge \([a-z_][a-z_]*\) .*/\1/p' \
-        -e 's/.*%s\([a-z_][a-z_]*\)[ {].*/\1/p' \
-        -e 's/.*\${METRICS_PREFIX}\([a-z_][a-z_]*\).*/\1/p' | sort -u | tr '\n' ' ')
+    sed -n -e 's/^ *gauge \([a-z_][a-z_]*\) .*/\1/p' \
+        -e 's/^ *fresh_gauge [^ ]* \([a-z_][a-z_]*\) .*/\1/p' | sort -u | tr '\n' ' ')
 
 for found in "outcomes:$outcomes" "prefix:$prefix" "metrics:$metrics"; do
     case "$found" in
