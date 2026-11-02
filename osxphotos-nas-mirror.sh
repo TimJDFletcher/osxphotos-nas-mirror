@@ -85,11 +85,12 @@ trim_run_log() {
     fi
 }
 
-# The fixed set of outcomes, each as name:exit code (sysexits.h). finish
-# takes the codes from here, and the metrics textfile has a series for each.
+# The fixed set of outcomes, each as name:exit code (sysexits.h), with a
+# third field, export-log, on those whose notification names the export log.
+# finish takes both from here, and the metrics textfile has a series for each.
 OUTCOMES="ok:0 skipped-preflight-check:0 skipped-locked:0 skipped-recent:0
-    usage-error:64 mount-failed:69 share-lost:69 export-failed:70
-    preflight-check-failed:70 db-copy-failed:74 interrupted:75 no-credentials:78"
+    usage-error:64 mount-failed:69 share-lost:69:export-log export-failed:70:export-log
+    preflight-check-failed:70 db-copy-failed:74 interrupted:75:export-log no-credentials:78"
 
 # The metrics textfile (METRICS_TEXTFILE in the conf), for node_exporter's
 # textfile collector. Every metric is a gauge named with this prefix.
@@ -237,7 +238,7 @@ metrics_text() {
     printf '# HELP %slast_run_outcome %s\n# TYPE %slast_run_outcome gauge\n' "$METRICS_PREFIX" \
         "The last run's outcome: 1 for the outcome it ended with, 0 for every other." "$METRICS_PREFIX"
     for entry in $OUTCOMES; do
-        name=${entry%:*}
+        name=${entry%%:*}
         value=0
         [ "$name" != "$1" ] || value=1
         printf '%slast_run_outcome{outcome="%s"} %s\n' "$METRICS_PREFIX" "$name" "$value"
@@ -324,11 +325,15 @@ write_metrics() {
 # run log, and trims it when it ends.
 finishing=
 finish() {
-    local code entry see
+    local code entry rest see
     finishing=$1
     code=
+    rest=
     for entry in $OUTCOMES; do
-        [ "${entry%:*}" != "$1" ] || code=${entry#*:}
+        if [ "${entry%%:*}" = "$1" ]; then
+            rest=${entry#*:}
+            code=${rest%%:*}
+        fi
     done
     if [ -z "$code" ]; then
         # A misspelt outcome is a bug in this script: EX_SOFTWARE.
@@ -337,8 +342,8 @@ finish() {
     fi
     if [ "$code" -ne 0 ]; then
         see=${LOG_FILE:-}
-        case "$1" in
-            export-failed | share-lost | interrupted) see=${export_log:-$see} ;;
+        case "$rest" in
+            *:export-log) see=${export_log:-$see} ;;
         esac
         if [ -n "$see" ]; then
             notify "Mirror run failed: $1. See $see."

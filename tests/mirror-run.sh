@@ -846,8 +846,9 @@ check "$(head -n 1 "$fake/app/osxphotos-nas-mirror.log")" "old line 1" \
 # --- the metrics textfile (METRICS_TEXTFILE), for node_exporter
 
 prefix=osxphotos_nas_mirror_
-# Every outcome in the fixed set, as finish and the README's table have them.
-all_outcomes="ok skipped-preflight-check skipped-recent skipped-locked usage-error mount-failed share-lost preflight-check-failed export-failed db-copy-failed interrupted no-credentials"
+# Every outcome in the fixed set, read from the script's OUTCOMES.
+all_outcomes=$("$root/tests/outcomes.sh" | cut -d ' ' -f 1 | tr '\n' ' ')
+outcome_count=$(echo "$all_outcomes" | wc -w | tr -d ' ')
 
 # with_metrics: set METRICS_TEXTFILE for the current case, in a directory of
 # its own, as node_exporter's textfile directory would be. Sets $prom.
@@ -964,8 +965,8 @@ check "$(outcome)" ok "a run with METRICS_TEXTFILE set ends ok"
 check "$(prom_format)" valid "the metrics textfile is in Prometheus text format"
 check "$(outcome_series)" "$(want_outcome_series ok)" \
     "an ok run sets the ok outcome series to 1 and every other outcome's to 0"
-check "$(grep -c "^${prefix}last_run_outcome{" "$prom")" 12 \
-    "the textfile has one outcome series for each of the 12 outcomes"
+check "$(grep -c "^${prefix}last_run_outcome{" "$prom")" "$outcome_count" \
+    "the textfile has one outcome series for each of the $outcome_count outcomes"
 ended=$(metric last_run_timestamp_seconds)
 check "$([ "$ended" -ge "$before" ] && [ "$ended" -le "$after" ] && echo during || echo "$ended")" during \
     "last_run_timestamp_seconds is when the run ended"

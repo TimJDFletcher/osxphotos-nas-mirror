@@ -10,8 +10,7 @@ cd "$(dirname "$0")/.."
 script=osxphotos-nas-mirror.sh
 dashboard=examples/grafana-dashboard.json
 
-outcomes=$(sed -n '/^OUTCOMES="/,/"$/p' "$script" | sed -e 's/^OUTCOMES=//' -e 's/"//g' |
-    tr -s ' \t' '\n' | sed -n 's/^\([a-z-]*\):[0-9]*$/\1/p' | tr '\n' ' ')
+outcomes=$(tests/outcomes.sh | cut -d ' ' -f 1 | tr '\n' ' ')
 prefix=$(sed -n 's/^METRICS_PREFIX=\([a-z_]*\)$/\1/p' "$script")
 # shellcheck disable=SC2016 # ${METRICS_PREFIX} is text to match, not to expand.
 metrics=$(sed -n '/^metrics_text() {/,/^}/p' "$script" |
