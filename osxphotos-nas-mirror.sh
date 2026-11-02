@@ -192,6 +192,28 @@ mirror_from_export_db() {
     read -r mirror_files mirror_bytes export_bytes <<< "$result"
 }
 
+# mark_export_for_metrics: if METRICS_TEXTFILE is set, just before the export
+# note where its history rows will start (see mirror_from_export_db). A new
+# export database has none yet.
+mark_export_for_metrics() {
+    [ -n "${METRICS_TEXTFILE:-}" ] || return 0
+    if [ -e "$OSXPHOTOS_EXPORT_DB" ]; then
+        export_db_read history_mark 'SELECT coalesce(max(id), 0) FROM history;' || history_mark=
+    else
+        history_mark=0
+    fi
+}
+
+# read_mirror_for_metrics: if METRICS_TEXTFILE is set, after an ok export read
+# the mirror's files and size from the export database. A read that fails is
+# a warning. This runs in the main shell, not in metrics_text, whose command
+# substitution would lose the values and the warning's place in the run log.
+read_mirror_for_metrics() {
+    [ -n "${METRICS_TEXTFILE:-}" ] || return 0
+    mirror_from_export_db ||
+        log "WARNING: Could not read the mirror's files and size from the export database $OSXPHOTOS_EXPORT_DB (${export_db_error:-no history mark from before the export}); the metrics keep the last ok run's."
+}
+
 # gauge NAME HELP VALUE [LABELS]: a gauge's HELP and TYPE lines and one
 # sample. Prints nothing if VALUE is empty.
 gauge() {
@@ -687,15 +709,7 @@ share_lost() {
     log "ERROR: The share is no longer mounted at $EXPORT_DIR. $1"
     finish share-lost
 }
-# For the metrics: where this export's history rows will start (see
-# mirror_from_export_db). A new export database has none yet.
-if [ -n "${METRICS_TEXTFILE:-}" ]; then
-    if [ -e "$OSXPHOTOS_EXPORT_DB" ]; then
-        export_db_read history_mark 'SELECT coalesce(max(id), 0) FROM history;' || history_mark=
-    else
-        history_mark=0
-    fi
-fi
+mark_export_for_metrics
 export_started=$SECONDS
 default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@27c2f9d68e924770ecdc6cdc902d0737f3a16fee
 if [ -z "${OSXPHOTOS_SOURCE:-}" ] && [ -x "$SCRIPT_DIR/python/bin/python3.13" ]; then
@@ -744,8 +758,6 @@ fi
 if ! touch "$STAMP"; then
     log "WARNING: Could not write $STAMP; the next run will not be held back."
 fi
-if [ -n "${METRICS_TEXTFILE:-}" ] && ! mirror_from_export_db; then
-    log "WARNING: Could not read the mirror's files and size from the export database $OSXPHOTOS_EXPORT_DB (${export_db_error:-no history mark from before the export}); the metrics keep the last ok run's."
-fi
+read_mirror_for_metrics
 log "Mirror run finished."
 finish ok
