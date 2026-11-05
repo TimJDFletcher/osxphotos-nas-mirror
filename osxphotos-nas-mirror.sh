@@ -137,16 +137,16 @@ export_db_read() {
 # export_bytes from the export database. Fails, setting none, if it can't,
 # with export_db_error saying why.
 #
-# What osxphotos (export_db.py and photoexporter.py at the pinned tag) keeps
+# What osxphotos (export_db.py and photoexporter.py at the pinned version) keeps
 # there, and why the obvious queries are wrong:
 # - export_data has a row per file ever exported, with dest_size, its size
 #   when osxphotos last wrote it. --cleanup never deletes a row, so rows for
 #   files cleaned up, or for photos deleted from the library, stay for good:
 #   count(*) and sum(dest_size) over-count.
 # - Its timestamp is bumped whenever osxphotos rewrites the row, which it
-#   does for most files it checks, but not for one the fork skips without a
-#   download because its original isn't on the Mac (the evicted RAW+JPEG
-#   pairs and Live Photos the fork exists for), nor for a skipped AAE. So
+#   does for most files it checks, but not for one it skips without a
+#   download because its original isn't on the Mac (an evicted RAW+JPEG pair
+#   or Live Photo already on the share), nor for a skipped AAE. So
 #   "timestamp since the export started" under-counts.
 # - history gets one row for every file the export deals with: action
 #   "new", "update: <reason>", "skip", "missing" or "export", each with an
@@ -698,11 +698,10 @@ log "Export log: $export_log"
 # known version: Homebrew's formula broke when Homebrew's cffi dropped
 # Python 3.13, and a mirror shouldn't upgrade its exporter between runs.
 # OSXPHOTOS_SOURCE in the conf is what uvx installs it from, a PyPI pin
-# (osxphotos==0.77.2) or a git+https://…@<ref>. Unset, it is the default
-# here: a commit on our fork's main, a copy of upstream's, which has the fixes
-# for two bugs that make 0.77.2 download evicted RAW+JPEG pairs and edited Live
-# Photos again on every run (upstream PRs RhetTbull/osxphotos#2265 and #2266);
-# it goes back to a PyPI pin once upstream releases the fixes.
+# (osxphotos==0.78.0) or a git+https://…@<ref>. Unset, it is the default
+# here, a PyPI release. It must be 0.78.0 or later: earlier releases download
+# evicted RAW+JPEG pairs and edited Live Photos again on every run (upstream
+# PRs RhetTbull/osxphotos#2265 and #2266).
 # OSXPHOTOS_CONFIG in the conf is the osxphotos TOML; unset, the repo's.
 # In the app, a Python with that pin is beside the script, and it runs that
 # unless the conf names a source. -B: a .pyc would break the app's signature.
@@ -720,7 +719,7 @@ share_lost() {
 }
 mark_export_for_metrics
 export_started=$SECONDS
-default_osxphotos_source=git+https://github.com/TimJDFletcher/osxphotos@27c2f9d68e924770ecdc6cdc902d0737f3a16fee
+default_osxphotos_source=osxphotos==0.78.0
 if [ -z "${OSXPHOTOS_SOURCE:-}" ] && [ -x "$SCRIPT_DIR/python/bin/python3.13" ]; then
     osxphotos=("$SCRIPT_DIR/python/bin/python3.13" -B -m osxphotos)
 else

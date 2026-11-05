@@ -26,7 +26,7 @@ Every run ends through `finish`, which sends a macOS notification on a non-zero 
 - Never run the script against the real conf from a test or an experiment: the stubs would write a fake export database over the real one. Tests set `OSXPHOTOS_NAS_MIRROR_CONF`.
 - The owner runs real runs. Mounts and keychain access fail or are blocked from an agent's shell, so test with the stubs and leave real runs to the user.
 - Don't raise a password dialog (ADR 0005). The tool never saves passwords; the user does it once in Finder.
-- Quote the pinned osxphotos commit only in `osxphotos-nas-mirror.sh` and `tests/mirror-run.sh`. A copy elsewhere goes stale.
+- Quote the pinned osxphotos version only in `osxphotos-nas-mirror.sh` and `tests/mirror-run.sh`. A copy elsewhere goes stale.
 
 ## What the Samba server needs
 
@@ -44,7 +44,7 @@ README ("Prerequisites") is the user-facing copy; keep the two in agreement. Whe
 
 ## Why the osxphotos setup is the way it is
 
-The ADRs hold the reasons for the big choices: the mount (0001), the export database on the SSD and no `--ramdb` (0002), uvx and the fork pin (0003), `cleanup = true` and the mirror (0004), the run lock that the export inherits (0006), the self-contained app launchd runs (0007). What they don't hold:
+The ADRs hold the reasons for the big choices: the mount (0001), the export database on the SSD and no `--ramdb` (0002), uvx and the PyPI pin (0003), `cleanup = true` and the mirror (0004), the run lock that the export inherits (0006), the self-contained app launchd runs (0007). What they don't hold:
 
 - No `--limit`: it caps one run's photo count and gives no resumption. Resumption comes from `update = true` and the export database. The script exports the whole library in one run, newest first.
 - No `overwrite` in `osxphotos.toml`: in update mode it only changes what happens when two photos map to the same file name (the second overwrites the first instead of becoming `name (1).ext`).

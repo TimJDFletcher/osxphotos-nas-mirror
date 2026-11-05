@@ -1,3 +1,13 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json"
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "osxphotos from PyPI, pinned as the default_osxphotos_source=… assignment in the script and as uvx's --from in the test that checks the uvx arguments",
+      "managerFilePatterns": ["/^osxphotos-nas-mirror\\.sh$/", "/^tests/mirror-run\\.sh$/"],
+      "matchStrings": ["(?:default_osxphotos_source=|--from )(?<depName>osxphotos)==(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    }
+  ]
 }
