@@ -1,6 +1,6 @@
 # osxphotos-nas-mirror
 
-Mirrors a Mac's Photos library to an SMB share on a NAS with osxphotos, unattended under launchd. It was called `icloud-photos-backup` before; old notes, issues and the local directory name may still use that.
+Mirrors a Mac's Photos library to an SMB share on a NAS with osxphotos, as a signed, self-contained macOS app that launchd starts (ADR 0007). It was called `icloud-photos-backup` before; old notes, issues and the local directory name may still use that.
 
 Read `GLOSSARY.md` first and use its terms (run, outcome, preflight check, run log, export log, metrics textfile, run lock, share, mirror, archive, export database). Read the `docs/adr/` entries for the area you touch: they hold the reasons behind the mounting, the export database, the osxphotos pin, the mirror, the keychain check, the run lock and the app. README.md is the user's manual (outcomes table, setup); don't copy it here.
 
